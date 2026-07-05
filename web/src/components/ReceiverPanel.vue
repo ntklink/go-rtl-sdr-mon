@@ -6,7 +6,7 @@
       <label>{{ t('rx.demod') }}</label>
       <SelectRoot v-model="selectedDemod">
         <SelectTrigger class="reka-select-trigger">
-          <SelectValue placeholder="选择..." />
+          <span class="select-display">{{ selectedDemod || '...' }}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -56,7 +56,7 @@
       <label>{{ t('rx.filterShape') }}</label>
       <SelectRoot v-model="filterShape" @update:model-value="onFilterShapeChange">
         <SelectTrigger class="reka-select-trigger">
-          <SelectValue placeholder="选择..." />
+          <span class="select-display">{{ filterShape || '...' }}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -118,10 +118,10 @@ const demods = ['OFF', 'Raw I/Q', 'AM', 'AM-Sync', 'LSB', 'USB', 'CW-L', 'CW-U',
 const squelchLevel = ref(-150)
 const filterShape = ref('normal')
 
-const selectedDemod = computed({
-  get: () => props.demod,
-  set: (val: string) => emit('update:demod', val),
-})
+// Local ref for demod, synced with prop
+const selectedDemod = ref(props.demod)
+watch(() => props.demod, (val) => { selectedDemod.value = val })
+watch(selectedDemod, (val) => { emit('update:demod', val) })
 
 const squelchSlider = computed({
   get: () => [squelchLevel.value],
@@ -198,5 +198,13 @@ async function onSquelchChange() {
 
 .preset-buttons button:hover {
   background: #333;
+}
+
+.select-display {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

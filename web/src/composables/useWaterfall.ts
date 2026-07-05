@@ -75,7 +75,7 @@ export function useWaterfall() {
 
     // Spectrum line
     ctx.strokeStyle = '#00ff88'
-    ctx.lineWidth = 1.5
+    ctx.lineWidth = 1
     ctx.beginPath()
     for (let i = 0; i < n; i++) {
       const x = (i / (n - 1)) * w

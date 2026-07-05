@@ -17,6 +17,14 @@
   transition: border-color 0.15s;
 }
 
+.select-display {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .reka-select-trigger:hover {
   border-color: #0066cc;
 }

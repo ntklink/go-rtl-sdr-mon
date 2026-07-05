@@ -2,7 +2,7 @@
   <div class="device-selector">
     <SelectRoot v-model="selectedID" @update:model-value="onSelect">
       <SelectTrigger class="reka-select-trigger device-trigger">
-        <SelectValue :placeholder="t('device.select')" />
+        <span class="select-display">{{ selectedDisplayName }}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
@@ -57,6 +57,10 @@ interface DeviceItem {
 
 const devices = ref<DeviceItem[]>([])
 const selectedID = ref('')
+const selectedDisplayName = computed(() => {
+  const dev = devices.value.find(d => d.id === selectedID.value)
+  return dev ? (dev.name || dev.product || dev.id) : t('device.select')
+})
 
 async function refresh() {
   try {

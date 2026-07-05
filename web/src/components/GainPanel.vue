@@ -15,7 +15,7 @@
       <label>{{ t('gain.agcPreset') }}</label>
       <SelectRoot v-model="agcPreset" @update:model-value="onAGCPresetChange">
         <SelectTrigger class="reka-select-trigger">
-          <SelectValue placeholder="选择..." />
+          <span class="select-display">{{ agcPreset || '...' }}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -88,7 +88,7 @@
       <label>{{ t('gain.fftSize') }}</label>
       <SelectRoot v-model="fftSizeStr" @update:model-value="onFFTSizeChange">
         <SelectTrigger class="reka-select-trigger">
-          <SelectValue placeholder="选择..." />
+          <span class="select-display">{{ fftSizeStr || '...' }}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -266,5 +266,13 @@ async function onFFTMaxHoldChange() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.select-display {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
