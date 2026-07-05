@@ -29,13 +29,30 @@ func main() {
 	ppm := flag.Int("ppm", 0, "Frequency correction in ppm")
 	flag.Parse()
 
-	// Open RTL-SDR source
-	log.Printf("Opening RTL-SDR device %d (sample rate: %d, freq: %d)...", *deviceIndex, *sampleRate, *frequency)
-	source, err := sdr.OpenSource(*deviceIndex, uint32(*sampleRate), uint32(*frequency))
+	// Create device manager with RTL-SDR enumerator
+	dm := sdr.NewDeviceManager(sdr.RTLSDREnumerator{})
+
+	// Enumerate available devices
+	devices := dm.Enumerate()
+	if len(devices) == 0 {
+		log.Fatalf("No SDR devices found")
+	}
+	log.Printf("Found %d SDR device(s):", len(devices))
+	for _, d := range devices {
+		log.Printf("  [%s] %s — %s (serial: %s)", d.ID, d.Name, d.Product, d.Serial)
+	}
+
+	// Open the specified device (default: first device)
+	openID := devices[0].ID
+	if *deviceIndex >= 0 && *deviceIndex < len(devices) {
+		openID = devices[*deviceIndex].ID
+	}
+	log.Printf("Opening device %s (sample rate: %d, freq: %d)...", openID, *sampleRate, *frequency)
+	source, err := dm.Open(openID, uint32(*sampleRate), uint32(*frequency))
 	if err != nil {
 		log.Fatalf("Failed to open SDR: %v", err)
 	}
-	defer source.Close()
+	defer dm.CloseAll()
 
 	// Print device info
 	info, _ := source.Info()
@@ -94,7 +111,7 @@ func main() {
 	}))
 
 	// Register API routes
-	server := NewServer(source, receiver)
+	server := NewServer(dm, receiver)
 	server.RegisterRoutes(e)
 
 	// Serve Vue frontend (embedded)

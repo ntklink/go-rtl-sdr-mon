@@ -56,14 +56,14 @@ func floatToInt16(v float32) int16 {
 // Server holds the HTTP server state and references to the SDR receiver.
 type Server struct {
 	receiver *sdr.Receiver
-	source   *sdr.Source
+	dm       *sdr.DeviceManager
 }
 
 // NewServer creates a new Server.
-func NewServer(source *sdr.Source, receiver *sdr.Receiver) *Server {
+func NewServer(dm *sdr.DeviceManager, receiver *sdr.Receiver) *Server {
 	return &Server{
 		receiver: receiver,
-		source:   source,
+		dm:       dm,
 	}
 }
 
@@ -73,6 +73,8 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 
 	// Device info
 	api.GET("/device", s.handleDeviceInfo)
+	api.GET("/devices", s.handleListDevices)
+	api.POST("/device/select", s.handleSelectDevice)
 
 	// Receiver control
 	api.GET("/status", s.handleStatus)
@@ -104,11 +106,97 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 // --- REST API Handlers ---
 
 func (s *Server) handleDeviceInfo(c echo.Context) error {
-	info, err := s.source.Info()
+	dev := s.dm.Active()
+	if dev == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no active device"})
+	}
+	info, err := dev.Info()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
+	info.ID = s.dm.ActiveID()
+	info.Active = true
 	return c.JSON(http.StatusOK, info)
+}
+
+func (s *Server) handleListDevices(c echo.Context) error {
+	available := s.dm.Enumerate()
+	open := s.dm.ListOpenDevices()
+	activeID := s.dm.ActiveID()
+
+	// Merge: mark which devices are open and which is active
+	openMap := make(map[string]sdr.DeviceInfo)
+	for _, o := range open {
+		openMap[o.ID] = o
+	}
+
+	type DeviceListItem struct {
+		sdr.DeviceDescriptor
+		Open   bool `json:"open"`
+		Active bool `json:"active"`
+	}
+
+	list := make([]DeviceListItem, 0, len(available))
+	for _, desc := range available {
+		item := DeviceListItem{DeviceDescriptor: desc}
+		if info, ok := openMap[desc.ID]; ok {
+			item.Open = true
+			item.Active = info.Active
+		}
+		item.Active = item.Active || desc.ID == activeID
+		list = append(list, item)
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"devices": list})
+}
+
+type selectDeviceRequest struct {
+	ID string `json:"id"`
+}
+
+func (s *Server) handleSelectDevice(c echo.Context) error {
+	var req selectDeviceRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	if req.ID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing device id"})
+	}
+
+	// Check if already open
+	if dev, ok := s.dm.Get(req.ID); ok {
+		// Just set as active
+		if err := s.dm.SetActive(req.ID); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		_ = dev // device already open
+		return c.JSON(http.StatusOK, map[string]string{"id": req.ID, "status": "active"})
+	}
+
+	// Need to open the device
+	// Get current config from receiver to apply to new device
+	config := s.receiver.GetConfig()
+	dev, err := s.dm.Open(req.ID, config.SampleRate, config.CenterFreq)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	// Apply current settings to new device
+	if config.FreqCorrection != 0 {
+		_ = dev.SetFreqCorrection(config.FreqCorrection)
+	}
+	if !config.AutoGain {
+		_ = dev.SetAutoGain(false)
+		if config.Gain != 0 {
+			_ = dev.SetGain(config.Gain)
+		}
+	}
+
+	if err := s.dm.SetActive(req.ID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"id": req.ID, "status": "opened"})
 }
 
 func (s *Server) handleStatus(c echo.Context) error {

@@ -101,7 +101,7 @@ func DefaultReceiverConfig() ReceiverConfig {
 type Receiver struct {
 	mu sync.Mutex
 
-	source   *Source
+	source   SDRDevice
 	spectrum *SpectrumFFT
 	ddc      *DDC
 	agc      *AGC
@@ -165,7 +165,7 @@ type Status struct {
 }
 
 // NewReceiver creates a new receiver with the given source and config.
-func NewReceiver(source *Source, config ReceiverConfig) *Receiver {
+func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	r := &Receiver{
 		source:       source,
 		spectrum:     NewSpectrumFFT(8192, 0.3),

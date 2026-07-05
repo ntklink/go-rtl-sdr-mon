@@ -27,7 +27,7 @@
           </SelectContent>
         </SelectPortal>
       </SelectRoot>
-      <button @click="applyFreq" class="btn-apply">设置</button>
+      <button @click="applyFreq" class="btn-apply">{{ t('top.set') }}</button>
     </div>
     <div class="freq-step-buttons">
       <button @click="stepFreq(-100000)">-100k</button>
@@ -43,6 +43,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
+import { useI18n } from '../composables/useI18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   frequency: number

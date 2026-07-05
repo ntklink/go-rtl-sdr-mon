@@ -1,9 +1,9 @@
 <template>
   <div class="panel receiver-panel">
-    <h3>接收机选项</h3>
+    <h3>{{ t('rx.title') }}</h3>
 
     <div class="control-group">
-      <label>解调模式</label>
+      <label>{{ t('rx.demod') }}</label>
       <SelectRoot v-model="selectedDemod">
         <SelectTrigger class="reka-select-trigger">
           <SelectValue placeholder="选择..." />
@@ -22,7 +22,7 @@
     </div>
 
     <div class="control-group">
-      <label>滤波器低截止 (Hz)</label>
+      <label>{{ t('rx.filterLow') }}</label>
       <input
         type="number"
         :value="filterLow"
@@ -33,7 +33,7 @@
     </div>
 
     <div class="control-group">
-      <label>滤波器高截止 (Hz)</label>
+      <label>{{ t('rx.filterHigh') }}</label>
       <input
         type="number"
         :value="filterHigh"
@@ -44,7 +44,7 @@
     </div>
 
     <div class="control-group">
-      <label>滤波器预设 (gqrx)</label>
+      <label>{{ t('rx.filterPreset') }}</label>
       <div class="preset-buttons">
         <button @click="onFilterPreset('wide')">Wide</button>
         <button @click="onFilterPreset('normal')">Normal</button>
@@ -53,7 +53,7 @@
     </div>
 
     <div class="control-group">
-      <label>滤波器形状</label>
+      <label>{{ t('rx.filterShape') }}</label>
       <SelectRoot v-model="filterShape" @update:model-value="onFilterShapeChange">
         <SelectTrigger class="reka-select-trigger">
           <SelectValue placeholder="选择..." />
@@ -72,7 +72,7 @@
     </div>
 
     <div class="control-group">
-      <label>静噪电平 (dBFS)</label>
+      <label>{{ t('rx.squelch') }}</label>
       <div class="slider-row">
         <SliderRoot
           v-model="squelchSlider"
@@ -87,7 +87,7 @@
           </SliderTrack>
           <SliderThumb class="reka-slider-thumb" />
         </SliderRoot>
-        <span class="value-display">{{ squelchLevel === -150 ? '关闭' : squelchLevel.toFixed(0) + ' dB' }}</span>
+        <span class="value-display">{{ squelchLevel === -150 ? t('rx.squelchOff') : squelchLevel.toFixed(0) + ' dB' }}</span>
       </div>
     </div>
   </div>
@@ -98,8 +98,10 @@ import { ref, watch, computed } from 'vue'
 import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
 import { useApi } from '../composables/useApi'
+import { useI18n } from '../composables/useI18n'
 
 const api = useApi()
+const { t } = useI18n()
 
 const props = defineProps<{
   demod: string

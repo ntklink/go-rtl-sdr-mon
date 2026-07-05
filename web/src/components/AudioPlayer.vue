@@ -1,6 +1,6 @@
 <template>
   <div class="panel audio-panel">
-    <h3>音频</h3>
+    <h3>{{ t('audio.title') }}</h3>
 
     <div class="audio-controls">
       <button
@@ -8,11 +8,11 @@
         :class="{ playing: isPlaying }"
         @click="togglePlay"
       >
-        {{ isPlaying ? '⏸ 停止' : '▶ 播放' }}
+        {{ isPlaying ? t('audio.stop') : t('audio.play') }}
       </button>
 
       <div class="volume-control">
-        <label>音量</label>
+        <label>{{ t('audio.volume') }}</label>
         <SliderRoot
           :model-value="[volume]"
           @update:model-value="onVolumeChange"
@@ -34,7 +34,7 @@
 
     <div class="audio-status">
       <span class="status-dot" :class="{ active: isPlaying }"></span>
-      {{ isPlaying ? '播放中' : '已停止' }}
+      {{ isPlaying ? t('audio.playing') : t('audio.stopped') }}
     </div>
   </div>
 </template>
@@ -42,8 +42,10 @@
 <script setup lang="ts">
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
 import { useAudio } from '../composables/useAudio'
+import { useI18n } from '../composables/useI18n'
 
 const { isPlaying, volume, error, start, stop, setVolume } = useAudio()
+const { t } = useI18n()
 
 function togglePlay() {
   if (isPlaying.value) {

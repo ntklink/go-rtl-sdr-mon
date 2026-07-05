@@ -9,9 +9,11 @@ import (
 	rtlsdr "github.com/ntklink/go-rtl-sdr"
 )
 
-// Source wraps an RTL-SDR device and provides a stream of complex64 samples.
-type Source struct {
+// RTLSDRSource wraps an RTL-SDR device and provides a stream of complex128 samples.
+// Implements the SDRDevice interface.
+type RTLSDRSource struct {
 	dev            *rtlsdr.Device
+	index          int // device index for re-open
 	sampleRate     uint32
 	centerFreq     uint32
 	freqCorrection int
@@ -30,21 +32,8 @@ type Source struct {
 	sampleCh chan []complex128
 }
 
-// SourceInfo holds device information returned at open time.
-type SourceInfo struct {
-	Index        int
-	Name         string
-	Manufacturer string
-	Product      string
-	Serial       string
-	TunerType    string
-	SampleRate   uint32
-	CenterFreq   uint32
-	Gains        []int // supported gain values in tenths of dB
-}
-
-// OpenSource opens the RTL-SDR device at the given index and configures defaults.
-func OpenSource(index int, sampleRate, centerFreq uint32) (*Source, error) {
+// OpenRTLSDR opens the RTL-SDR device at the given index and configures defaults.
+func OpenRTLSDR(index int, sampleRate, centerFreq uint32) (*RTLSDRSource, error) {
 	count := rtlsdr.GetDeviceCount()
 	if count == 0 {
 		return nil, fmt.Errorf("no RTL-SDR devices found")
@@ -58,8 +47,9 @@ func OpenSource(index int, sampleRate, centerFreq uint32) (*Source, error) {
 		return nil, fmt.Errorf("open device %d: %w", index, err)
 	}
 
-	s := &Source{
+	s := &RTLSDRSource{
 		dev:        dev,
+		index:      index,
 		sampleRate: sampleRate,
 		centerFreq: centerFreq,
 		bufferSize: 147456, // 9×16384 bytes → ~24.4 fps at 1.8 MHz
@@ -92,16 +82,16 @@ func OpenSource(index int, sampleRate, centerFreq uint32) (*Source, error) {
 }
 
 // Info returns device information.
-func (s *Source) Info() (SourceInfo, error) {
-	idx := 0 // we don't store the index; could be improved
+func (s *RTLSDRSource) Info() (DeviceInfo, error) {
 	usb, err := s.dev.GetUSBStrings()
 	if err != nil {
 		usb = rtlsdr.USBStrings{}
 	}
 	gains, _ := s.dev.GetTunerGains()
-	return SourceInfo{
-		Index:        idx,
-		Name:         rtlsdr.GetDeviceName(idx),
+	return DeviceInfo{
+		Driver:       "rtlsdr",
+		Index:        s.index,
+		Name:         rtlsdr.GetDeviceName(s.index),
 		Manufacturer: usb.Manufacturer,
 		Product:      usb.Product,
 		Serial:       usb.Serial,
@@ -113,12 +103,12 @@ func (s *Source) Info() (SourceInfo, error) {
 }
 
 // Samples returns the channel that delivers IQ sample blocks.
-func (s *Source) Samples() <-chan []complex128 {
+func (s *RTLSDRSource) Samples() <-chan []complex128 {
 	return s.sampleCh
 }
 
 // Start begins async sample reading. Blocks the calling goroutine until Stop.
-func (s *Source) Start() error {
+func (s *RTLSDRSource) Start() error {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -153,7 +143,7 @@ func (s *Source) Start() error {
 }
 
 // Stop stops sample reading.
-func (s *Source) Stop() {
+func (s *RTLSDRSource) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.running {
@@ -165,7 +155,7 @@ func (s *Source) Stop() {
 }
 
 // Close closes the device.
-func (s *Source) Close() {
+func (s *RTLSDRSource) Close() {
 	s.Stop()
 	if s.dev != nil {
 		s.dev.Close()
@@ -174,7 +164,7 @@ func (s *Source) Close() {
 }
 
 // SetCenterFreq sets the center frequency in Hz.
-func (s *Source) SetCenterFreq(freq uint32) error {
+func (s *RTLSDRSource) SetCenterFreq(freq uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.centerFreq = freq
@@ -182,12 +172,12 @@ func (s *Source) SetCenterFreq(freq uint32) error {
 }
 
 // GetCenterFreq returns the current center frequency in Hz.
-func (s *Source) GetCenterFreq() uint32 {
+func (s *RTLSDRSource) GetCenterFreq() uint32 {
 	return s.dev.GetCenterFreq()
 }
 
 // SetFreqCorrection sets the frequency correction in ppm.
-func (s *Source) SetFreqCorrection(ppm int) error {
+func (s *RTLSDRSource) SetFreqCorrection(ppm int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.freqCorrection = ppm
@@ -195,7 +185,7 @@ func (s *Source) SetFreqCorrection(ppm int) error {
 }
 
 // SetSampleRate sets the sample rate in Hz.
-func (s *Source) SetSampleRate(rate uint32) error {
+func (s *RTLSDRSource) SetSampleRate(rate uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sampleRate = rate
@@ -203,12 +193,12 @@ func (s *Source) SetSampleRate(rate uint32) error {
 }
 
 // GetSampleRate returns the current sample rate in Hz.
-func (s *Source) GetSampleRate() uint32 {
+func (s *RTLSDRSource) GetSampleRate() uint32 {
 	return s.dev.GetSampleRate()
 }
 
 // SetAutoGain enables or disables automatic gain.
-func (s *Source) SetAutoGain(auto bool) error {
+func (s *RTLSDRSource) SetAutoGain(auto bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.autoGain.Store(auto)
@@ -232,7 +222,7 @@ func (s *Source) SetAutoGain(auto bool) error {
 }
 
 // SetGain sets the manual gain in tenths of dB (e.g., 115 = 11.5 dB).
-func (s *Source) SetGain(gain int) error {
+func (s *RTLSDRSource) SetGain(gain int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gain = gain
@@ -240,17 +230,17 @@ func (s *Source) SetGain(gain int) error {
 }
 
 // GetGain returns the current gain in tenths of dB.
-func (s *Source) GetGain() int {
+func (s *RTLSDRSource) GetGain() int {
 	return s.dev.GetTunerGain()
 }
 
 // IsAutoGain returns whether auto gain is enabled.
-func (s *Source) IsAutoGain() bool {
+func (s *RTLSDRSource) IsAutoGain() bool {
 	return s.autoGain.Load()
 }
 
 // SetBandwidth sets the tuner bandwidth in Hz (0 = auto).
-func (s *Source) SetBandwidth(bw uint32) error {
+func (s *RTLSDRSource) SetBandwidth(bw uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bandwidth = bw
@@ -258,7 +248,7 @@ func (s *Source) SetBandwidth(bw uint32) error {
 }
 
 // SetBiasTee enables or disables the bias-T.
-func (s *Source) SetBiasTee(on bool) error {
+func (s *RTLSDRSource) SetBiasTee(on bool) error {
 	return s.dev.SetBiasTee(on)
 }
 
@@ -274,4 +264,44 @@ func bytesToComplex(data []byte) []complex128 {
 		samples[i] = complex(re, im)
 	}
 	return samples
+}
+
+// Compile-time interface checks.
+var _ SDRDevice = (*RTLSDRSource)(nil)
+
+// RTLSDREnumerator implements DeviceEnumerator for RTL-SDR devices.
+type RTLSDREnumerator struct{}
+
+// DriverName returns the driver name.
+func (RTLSDREnumerator) DriverName() string { return "rtlsdr" }
+
+// Enumerate returns all available RTL-SDR devices.
+func (RTLSDREnumerator) Enumerate() []DeviceDescriptor {
+	count := rtlsdr.GetDeviceCount()
+	descs := make([]DeviceDescriptor, 0, count)
+	for i := 0; i < count; i++ {
+		usb, err := rtlsdr.GetDeviceUSBStrings(i)
+		if err != nil {
+			usb = rtlsdr.USBStrings{}
+		}
+		serial := usb.Serial
+		if serial == "" {
+			serial = fmt.Sprintf("idx%d", i)
+		}
+		descs = append(descs, DeviceDescriptor{
+			ID:           fmt.Sprintf("rtlsdr-%s", serial),
+			Driver:       "rtlsdr",
+			Index:        i,
+			Name:         rtlsdr.GetDeviceName(i),
+			Manufacturer: usb.Manufacturer,
+			Product:      usb.Product,
+			Serial:       usb.Serial,
+		})
+	}
+	return descs
+}
+
+// Open opens an RTL-SDR device at the given index.
+func (RTLSDREnumerator) Open(index int, sampleRate, centerFreq uint32) (SDRDevice, error) {
+	return OpenRTLSDR(index, sampleRate, centerFreq)
 }

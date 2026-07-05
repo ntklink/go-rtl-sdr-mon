@@ -1,10 +1,10 @@
 <template>
   <div class="panel gain-panel">
-    <h3>增益控制</h3>
+    <h3>{{ t('gain.title') }}</h3>
 
     <div class="control-group">
       <div class="switch-row">
-        <label>自动增益 (AGC)</label>
+        <label>{{ t('gain.autoGain') }}</label>
         <SwitchRoot v-model="autoGain" class="reka-switch-root" @update:model-value="onAutoGainChange">
           <SwitchThumb class="reka-switch-thumb" />
         </SwitchRoot>
@@ -12,7 +12,7 @@
     </div>
 
     <div class="control-group">
-      <label>AGC 预设</label>
+      <label>{{ t('gain.agcPreset') }}</label>
       <SelectRoot v-model="agcPreset" @update:model-value="onAGCPresetChange">
         <SelectTrigger class="reka-select-trigger">
           <SelectValue placeholder="选择..." />
@@ -32,7 +32,7 @@
     </div>
 
     <div v-if="!autoGain" class="control-group">
-      <label>手动增益</label>
+      <label>{{ t('gain.manual') }}</label>
       <div class="slider-row">
         <SliderRoot
           v-model="gainSlider"
@@ -54,7 +54,7 @@
     </div>
 
     <div class="control-group">
-      <label>频率校准 (ppm)</label>
+      <label>{{ t('gain.ppm') }}</label>
       <input
         type="number"
         v-model.number="ppm"
@@ -65,7 +65,7 @@
     </div>
 
     <div class="control-group">
-      <label>FFT 平滑</label>
+      <label>{{ t('gain.fftAvg') }}</label>
       <div class="slider-row">
         <SliderRoot
           v-model="avgSlider"
@@ -85,7 +85,7 @@
     </div>
 
     <div class="control-group">
-      <label>FFT 大小</label>
+      <label>{{ t('gain.fftSize') }}</label>
       <SelectRoot v-model="fftSizeStr" @update:model-value="onFFTSizeChange">
         <SelectTrigger class="reka-select-trigger">
           <SelectValue placeholder="选择..." />
@@ -102,7 +102,7 @@
     </div>
 
     <div class="control-group">
-      <label>FFT 刷新率 (fps)</label>
+      <label>{{ t('gain.fftRate') }}</label>
       <div class="slider-row">
         <SliderRoot
           v-model="fftRateSlider"
@@ -123,7 +123,7 @@
 
     <div class="control-group">
       <div class="switch-row">
-        <label>FFT Max-Hold</label>
+        <label>{{ t('gain.fftMaxHold') }}</label>
         <SwitchRoot v-model="fftMaxHold" class="reka-switch-root" @update:model-value="onFFTMaxHoldChange">
           <SwitchThumb class="reka-switch-thumb" />
         </SwitchRoot>
@@ -138,8 +138,10 @@ import { SwitchRoot, SwitchThumb } from 'reka-ui'
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
 import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { useApi } from '../composables/useApi'
+import { useI18n } from '../composables/useI18n'
 
 const api = useApi()
+const { t } = useI18n()
 
 const autoGain = ref(true)
 const gainIndex = ref(0)

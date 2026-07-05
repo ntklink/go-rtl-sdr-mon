@@ -23,6 +23,8 @@ async function getJSON(path: string): Promise<any> {
 export function useApi() {
   return {
     getDeviceInfo: () => getJSON('/device'),
+    listDevices: () => getJSON('/devices'),
+    selectDevice: (id: string) => postJSON('/device/select', { id }),
     getStatus: () => getJSON('/status'),
     setFrequency: (frequency: number) => postJSON('/frequency', { frequency }),
     setDemod: (demod: string) => postJSON('/demod', { demod }),
