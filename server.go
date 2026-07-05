@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
 	"sync"
@@ -15,25 +14,6 @@ import (
 )
 
 // --- Utility functions (migrated from console.go) ---
-
-// formatFreq formats a frequency in Hz to a human-readable string.
-func formatFreq(hz uint32) string {
-	if hz >= 1_000_000_000 {
-		return fmt.Sprintf("%.3f GHz", float64(hz)/1e9)
-	}
-	if hz >= 1_000_000 {
-		return fmt.Sprintf("%.3f MHz", float64(hz)/1e6)
-	}
-	if hz >= 1_000 {
-		return fmt.Sprintf("%.3f kHz", float64(hz)/1e3)
-	}
-	return fmt.Sprintf("%d Hz", hz)
-}
-
-// formatGain formats a gain value (in tenths of dB) to a string.
-func formatGain(gain int) string {
-	return fmt.Sprintf("%.1f dB", float64(gain)/10.0)
-}
 
 // demodOptions returns the list of available demodulator names (matches gqrx order).
 func demodOptions() []string {

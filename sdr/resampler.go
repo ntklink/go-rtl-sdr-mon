@@ -4,23 +4,49 @@ import (
 	"math"
 )
 
-// Resampler resamples float64 audio from one sample rate to another
-// using linear interpolation.
+// Resampler resamples float64 audio from one sample rate to another.
+// It applies an anti-aliasing FIR low-pass filter before linear interpolation
+// to prevent aliasing when downsampling.
 type Resampler struct {
 	inputRate  float64
 	outputRate float64
 	ratio      float64
 	phase      float64
 	lastSample float64
+
+	// Anti-aliasing filter (used when downsampling)
+	aaFilter *FIRFilter
+	aaBuf    []float64
+	aaIdx    int
 }
 
 // NewResampler creates a new resampler.
 func NewResampler(inputRate, outputRate float64) *Resampler {
-	return &Resampler{
+	r := &Resampler{
 		inputRate:  inputRate,
 		outputRate: outputRate,
 		ratio:      outputRate / inputRate,
 	}
+
+	// When downsampling, create an anti-aliasing filter
+	// with cutoff at outputRate/2
+	if outputRate < inputRate {
+		numTaps := 63
+		cutoff := outputRate / 2 * 0.9 // 90% of output Nyquist
+		taps := DesignLowpass(inputRate, cutoff, numTaps)
+		r.aaFilter = NewFIRFilter(taps)
+		r.aaBuf = make([]float64, numTaps)
+	}
+
+	return r
+}
+
+// aaFilterSample applies the anti-aliasing filter to a single sample.
+func (r *Resampler) aaFilterSample(x float64) float64 {
+	if r.aaFilter == nil {
+		return x
+	}
+	return r.aaFilter.Filter(x)
 }
 
 // Process resamples a block of samples.
@@ -29,20 +55,31 @@ func (r *Resampler) Process(in []float64) []float64 {
 		return nil
 	}
 
+	// Apply anti-aliasing filter if downsampling
+	var src []float64
+	if r.aaFilter != nil {
+		src = make([]float64, len(in))
+		for i, x := range in {
+			src[i] = r.aaFilter.Filter(x)
+		}
+	} else {
+		src = in
+	}
+
 	// Estimate output length
-	outLen := int(math.Ceil(float64(len(in)) * r.ratio))
+	outLen := int(math.Ceil(float64(len(src)) * r.ratio))
 	out := make([]float64, 0, outLen)
 
-	for r.phase < float64(len(in))-1 {
+	for r.phase < float64(len(src))-1 {
 		idx := int(r.phase)
 		frac := r.phase - float64(idx)
 
 		// Linear interpolation
-		s := r.lastSample*(1-frac) + in[idx]*frac
+		var s float64
 		if idx == 0 {
-			s = r.lastSample*(1-frac) + in[idx]*frac
+			s = r.lastSample*(1-frac) + src[idx]*frac
 		} else {
-			s = in[idx-1]*(1-frac) + in[idx]*frac
+			s = src[idx-1]*(1-frac) + src[idx]*frac
 		}
 
 		out = append(out, s)
@@ -50,8 +87,8 @@ func (r *Resampler) Process(in []float64) []float64 {
 	}
 
 	// Adjust phase for next block
-	r.phase -= float64(len(in))
-	r.lastSample = in[len(in)-1]
+	r.phase -= float64(len(src))
+	r.lastSample = src[len(src)-1]
 
 	return out
 }

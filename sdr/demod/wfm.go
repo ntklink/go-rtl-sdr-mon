@@ -125,8 +125,9 @@ func (d *WFMDemod) Process(in []complex128) (left, right []float64) {
 	}
 
 	if !d.stereo {
-		// Mono: just low-pass filter, NO de-emphasis (gqrx wfmrx mono has none)
+		// Mono: low-pass filter + de-emphasis (50µs, matches gqrx wfmrx)
 		mono := d.audioLP.filterSlice(demod)
+		mono = d.deemphL.filterSlice(mono)
 		return mono, nil
 	}
 

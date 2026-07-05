@@ -12,25 +12,25 @@ export function useWaterfall() {
   let reconnectTimer: number | null = null
   let rafId: number | null = null
 
-  // Colormap: blue -> cyan -> green -> yellow -> red
+  // Colormap: dark blue -> blue -> purple -> dark red -> orange (darker palette)
   function getColor(db: number): [number, number, number] {
     // Map dB range [-100, 0] to [0, 1]
     const norm = Math.max(0, Math.min(1, (db + 100) / 100))
     if (norm < 0.2) {
       const t = norm / 0.2
-      return [0, 0, Math.floor(t * 255)]
+      return [0, 0, Math.floor(t * 80)]          // black -> dark blue
     } else if (norm < 0.4) {
       const t = (norm - 0.2) / 0.2
-      return [0, Math.floor(t * 255), 255]
+      return [0, 0, Math.floor(80 + t * 100)]     // dark blue -> blue
     } else if (norm < 0.6) {
       const t = (norm - 0.4) / 0.2
-      return [0, 255, Math.floor(255 - t * 255)]
+      return [Math.floor(t * 100), 0, Math.floor(180 - t * 80)]  // blue -> purple
     } else if (norm < 0.8) {
       const t = (norm - 0.6) / 0.2
-      return [Math.floor(t * 255), 255, 0]
+      return [Math.floor(100 + t * 80), Math.floor(t * 40), Math.floor(100 - t * 60)]  // purple -> dark red
     } else {
       const t = (norm - 0.8) / 0.2
-      return [255, Math.floor(255 - t * 255), 0]
+      return [Math.floor(180 + t * 60), Math.floor(40 + t * 80), 0]  // dark red -> orange
     }
   }
 
@@ -75,7 +75,7 @@ export function useWaterfall() {
 
     // Spectrum line
     ctx.strokeStyle = '#00ff88'
-    ctx.lineWidth = 1
+    ctx.lineWidth = 0.5
     ctx.beginPath()
     for (let i = 0; i < n; i++) {
       const x = (i / (n - 1)) * w

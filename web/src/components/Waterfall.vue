@@ -2,7 +2,12 @@
   <div class="waterfall-container">
     <!-- Frequency axis -->
     <div class="freq-axis" ref="freqAxis">
-      <span v-for="tick in freqTicks" :key="tick.freq" :style="{ left: tick.pos + '%' }">
+      <span
+        v-for="(tick, i) in freqTicks"
+        :key="tick.freq"
+        :class="{ 'tick-left': i === 0, 'tick-right': i === freqTicks.length - 1 }"
+        :style="{ left: tick.pos + '%' }"
+      >
         {{ tick.label }}
       </span>
     </div>
@@ -83,6 +88,14 @@ function updateCanvasSize() {
   const container = spectrumCanvas.value?.parentElement
   if (container) {
     canvasWidth.value = container.clientWidth
+    // Auto-fit height: split available space between spectrum (35%) and waterfall (65%)
+    const containerHeight = container.clientHeight
+    const axisHeight = 21 // freq-axis height + border
+    const availableHeight = containerHeight - axisHeight
+    if (availableHeight > 0) {
+      spectrumHeight.value = Math.floor(availableHeight * 0.35)
+      waterfallHeight.value = Math.floor(availableHeight * 0.65)
+    }
   }
 }
 
@@ -95,8 +108,10 @@ watch([canvasWidth, spectrumHeight, waterfallHeight], () => {
 .waterfall-container {
   position: relative;
   width: 100%;
+  height: 100%;
   background: #0a0a0a;
   border: 1px solid #222;
+  overflow: hidden;
 }
 
 .freq-axis {
@@ -106,6 +121,7 @@ watch([canvasWidth, spectrumHeight, waterfallHeight], () => {
   font-size: 10px;
   color: #888;
   border-bottom: 1px solid #333;
+  overflow: hidden;
 }
 
 .freq-axis span {
@@ -115,10 +131,17 @@ watch([canvasWidth, spectrumHeight, waterfallHeight], () => {
   white-space: nowrap;
 }
 
+.freq-axis span.tick-left {
+  transform: translateX(5%);
+}
+
+.freq-axis span.tick-right {
+  transform: translateX(-105%);
+}
+
 .spectrum {
   display: block;
   width: 100%;
-  border-bottom: 1px solid #222;
 }
 
 .waterfall {
