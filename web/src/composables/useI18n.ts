@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 
 // Translation messages for supported locales
 const messages: Record<string, Record<string, string>> = {
@@ -114,9 +114,9 @@ function setLocale(l: string) {
 }
 
 export function useI18n() {
-  const t = computed(() => (key: string): string => {
+  const t = (key: string): string => {
     return messages[locale.value]?.[key] || messages['en']?.[key] || key
-  })
+  }
 
   return { t, locale, setLocale }
 }

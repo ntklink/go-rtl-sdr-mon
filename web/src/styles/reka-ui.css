@@ -68,7 +68,9 @@
 .reka-slider-root {
   display: flex;
   align-items: center;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  position: relative;
   height: 20px;
 }
 
@@ -93,7 +95,7 @@
   border: 2px solid #0a0a0a;
   cursor: pointer;
   outline: none;
-  margin-left: -7px;
+  transform: translateX(-50%);
 }
 
 .reka-slider-thumb:focus-visible {

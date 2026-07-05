@@ -133,15 +133,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { SwitchRoot, SwitchThumb } from 'reka-ui'
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
 import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
+import { useStatus } from '../composables/useStatus'
 
 const api = useApi()
 const { t } = useI18n()
+const { status, statusLoaded } = useStatus()
 
 const autoGain = ref(true)
 const gainIndex = ref(0)
@@ -153,6 +155,44 @@ const fftSizes = [1024, 2048, 4096, 8192, 16384]
 const fftSizeStr = ref('8192')
 const fftRate = ref(25)
 const fftMaxHold = ref(false)
+
+// One-time sync from backend status (on page load / reconnect)
+let synced = false
+function syncFromStatus() {
+  if (synced || !statusLoaded.value) return
+  synced = true
+  const s = status.value
+  autoGain.value = s.AutoGain
+  ppm.value = s.FreqCorrection
+  spectrumAvg.value = s.SpectrumAvg
+  fftSizeStr.value = String(s.FFTSize)
+  fftRate.value = s.FFTRate
+  fftMaxHold.value = s.FFTMaxHold
+  agcPreset.value = (s.AGCPreset || 'Medium').toLowerCase()
+  syncGainIndex()
+}
+
+// Find closest gain index from backend Gain value
+function syncGainIndex() {
+  const s = status.value
+  if (gains.value.length > 0 && s.Gain > 0) {
+    let bestIdx = 0
+    let bestDiff = Math.abs(gains.value[0] - s.Gain)
+    for (let i = 1; i < gains.value.length; i++) {
+      const diff = Math.abs(gains.value[i] - s.Gain)
+      if (diff < bestDiff) {
+        bestDiff = diff
+        bestIdx = i
+      }
+    }
+    gainIndex.value = bestIdx
+  }
+}
+
+// Sync immediately if status is already loaded, otherwise wait for it
+watch(statusLoaded, () => syncFromStatus(), { immediate: true })
+// If gains arrive after status sync, try gain index sync again
+watch(gains, () => { if (synced) syncGainIndex() })
 
 const gainSlider = computed({
   get: () => [gainIndex.value],

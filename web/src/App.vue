@@ -23,7 +23,7 @@
           </div>
         </div>
         <button class="locale-btn" @click="toggleLocale" :title="locale === 'zh-CN' ? 'Switch to English' : '切换到中文'">
-          {{ locale === 'zh-CN' ? 'EN' : 'CN' }}
+          {{ locale === 'zh-CN' ? 'CN' : 'EN' }}
         </button>
       </div>
     </div>
@@ -40,7 +40,7 @@
             <TabsTrigger value="gain" class="reka-tabs-trigger">{{ t('tab.gain') }}</TabsTrigger>
             <TabsTrigger value="audio" class="reka-tabs-trigger">{{ t('tab.audio') }}</TabsTrigger>
           </TabsList>
-          <TabsContent value="receiver" class="reka-tabs-content">
+          <TabsContent value="receiver" force-mount class="reka-tabs-content">
             <ReceiverPanel
               :demod="status.Demod"
               :filter-low="status.FilterLow"
@@ -49,10 +49,10 @@
               @update:filter="setFilter"
             />
           </TabsContent>
-          <TabsContent value="gain" class="reka-tabs-content">
+          <TabsContent value="gain" force-mount class="reka-tabs-content">
             <GainPanel />
           </TabsContent>
-          <TabsContent value="audio" class="reka-tabs-content">
+          <TabsContent value="audio" force-mount class="reka-tabs-content">
             <AudioPlayer />
           </TabsContent>
         </TabsRoot>

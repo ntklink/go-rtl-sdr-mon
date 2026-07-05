@@ -522,7 +522,8 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 	}
 	defer ws.Close()
 
-	fftCh := s.receiver.FFTCh()
+	fftCh := s.receiver.SubscribeFFT()
+	defer s.receiver.UnsubscribeFFT(fftCh)
 
 	// Send FFT size first
 	size := s.receiver.GetSpectrumSize()
@@ -563,7 +564,8 @@ func (s *Server) handleWSAudio(c echo.Context) error {
 	}
 	defer ws.Close()
 
-	audioCh := s.receiver.AudioCh()
+	audioCh := s.receiver.SubscribeAudio()
+	defer s.receiver.UnsubscribeAudio(audioCh)
 	var writeMu sync.Mutex
 
 	// Reader for close detection
@@ -630,7 +632,8 @@ func (s *Server) handleWSStatus(c echo.Context) error {
 	}
 	defer ws.Close()
 
-	statusCh := s.receiver.StatusCh()
+	statusCh := s.receiver.SubscribeStatus()
+	defer s.receiver.UnsubscribeStatus(statusCh)
 
 	// Also send periodic updates
 	ticker := time.NewTicker(500 * time.Millisecond)

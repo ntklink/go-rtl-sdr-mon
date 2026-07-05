@@ -205,6 +205,10 @@ body {
   font-size: 11px;
   color: #00ff88;
   font-family: 'Courier New', monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 48px;
+  text-align: right;
 }
 
 /* Scrollbar */

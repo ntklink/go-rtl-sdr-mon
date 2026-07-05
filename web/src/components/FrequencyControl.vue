@@ -93,7 +93,6 @@ function stepFreq(delta: number) {
   gap: 16px;
   padding: 8px 16px;
   background: #111;
-  border-bottom: 1px solid #333;
 }
 
 .freq-display {

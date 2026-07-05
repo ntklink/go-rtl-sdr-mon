@@ -99,9 +99,11 @@ import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, Sele
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
+import { useStatus } from '../composables/useStatus'
 
 const api = useApi()
 const { t } = useI18n()
+const { status, statusLoaded } = useStatus()
 
 const props = defineProps<{
   demod: string
@@ -122,6 +124,16 @@ const filterShape = ref('normal')
 const selectedDemod = ref(props.demod)
 watch(() => props.demod, (val) => { selectedDemod.value = val })
 watch(selectedDemod, (val) => { emit('update:demod', val) })
+
+// One-time sync from backend status (on page load / reconnect)
+let synced = false
+watch(statusLoaded, (loaded) => {
+  if (!loaded || synced) return
+  synced = true
+  const s = status.value
+  squelchLevel.value = s.SquelchLevel
+  filterShape.value = (s.FilterShape || 'Normal').toLowerCase()
+}, { immediate: true })
 
 const squelchSlider = computed({
   get: () => [squelchLevel.value],

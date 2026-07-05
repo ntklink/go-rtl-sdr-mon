@@ -129,10 +129,11 @@ type Receiver struct {
 	audioResampler  *Resampler
 	audioResamplerR *Resampler
 
-	// Output channels
-	fftCh    chan []float32
-	audioCh  chan AudioBlock
-	statusCh chan Status
+	// Output subscribers (per-client channels)
+	audioSubs map[chan AudioBlock]struct{}
+	fftSubs   map[chan []float32]struct{}
+	statSubs  map[chan Status]struct{}
+	subMu     sync.Mutex
 
 	// FFT rate limiting
 	fftRate     float64   // target FFT rate in fps
@@ -162,6 +163,18 @@ type Status struct {
 	FilterOffset float64
 	CWOffset     float64
 	FilterShape  string
+
+	// Settings (for frontend state recovery after page refresh)
+	SquelchLevel   float64 // dBFS, -150 = open
+	SpectrumAvg    float64 // FFT averaging factor (0..1)
+	FFTRate        float64 // target FFT rate in fps
+	FFTMaxHold     bool    // max-hold plot mode
+	FFTSize        int     // FFT size
+	AutoGain       bool    // SDR auto gain
+	Gain           int     // manual gain in tenths of dB
+	FreqCorrection int     // ppm
+	AGCOn          bool    // AGC enabled
+	AGCPreset      string  // AGC preset name
 }
 
 // NewReceiver creates a new receiver with the given source and config.
@@ -178,9 +191,9 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 		filterOffset: config.FilterOffset,
 		filterShape:  FilterShapeNormal,
 		cwOffset:     config.CWOffset,
-		fftCh:        make(chan []float32, 2),
-		audioCh:      make(chan AudioBlock, 4),
-		statusCh:     make(chan Status, 1),
+		audioSubs:    make(map[chan AudioBlock]struct{}),
+		fftSubs:      make(map[chan []float32]struct{}),
+		statSubs:     make(map[chan Status]struct{}),
 		stopCh:       make(chan struct{}),
 		fftRate:      25.0, // 25 fps (gqrx default)
 	}
@@ -203,14 +216,92 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	return r
 }
 
-// FFTCh returns the channel for FFT spectrum data.
-func (r *Receiver) FFTCh() <-chan []float32 { return r.fftCh }
+// SubscribeAudio creates a per-client audio channel.
+func (r *Receiver) SubscribeAudio() chan AudioBlock {
+	ch := make(chan AudioBlock, 4)
+	r.subMu.Lock()
+	r.audioSubs[ch] = struct{}{}
+	r.subMu.Unlock()
+	return ch
+}
 
-// AudioCh returns the channel for audio data.
-func (r *Receiver) AudioCh() <-chan AudioBlock { return r.audioCh }
+// UnsubscribeAudio removes a subscriber and closes its channel.
+func (r *Receiver) UnsubscribeAudio(ch chan AudioBlock) {
+	r.subMu.Lock()
+	delete(r.audioSubs, ch)
+	r.subMu.Unlock()
+	close(ch)
+}
 
-// StatusCh returns the channel for status updates.
-func (r *Receiver) StatusCh() <-chan Status { return r.statusCh }
+// SubscribeFFT creates a per-client FFT channel.
+func (r *Receiver) SubscribeFFT() chan []float32 {
+	ch := make(chan []float32, 2)
+	r.subMu.Lock()
+	r.fftSubs[ch] = struct{}{}
+	r.subMu.Unlock()
+	return ch
+}
+
+// UnsubscribeFFT removes a subscriber and closes its channel.
+func (r *Receiver) UnsubscribeFFT(ch chan []float32) {
+	r.subMu.Lock()
+	delete(r.fftSubs, ch)
+	r.subMu.Unlock()
+	close(ch)
+}
+
+// SubscribeStatus creates a per-client status channel.
+func (r *Receiver) SubscribeStatus() chan Status {
+	ch := make(chan Status, 1)
+	r.subMu.Lock()
+	r.statSubs[ch] = struct{}{}
+	r.subMu.Unlock()
+	return ch
+}
+
+// UnsubscribeStatus removes a subscriber and closes its channel.
+func (r *Receiver) UnsubscribeStatus(ch chan Status) {
+	r.subMu.Lock()
+	delete(r.statSubs, ch)
+	r.subMu.Unlock()
+	close(ch)
+}
+
+// broadcastAudio sends an audio block to all subscribers (non-blocking).
+func (r *Receiver) broadcastAudio(block AudioBlock) {
+	r.subMu.Lock()
+	for ch := range r.audioSubs {
+		select {
+		case ch <- block:
+		default:
+		}
+	}
+	r.subMu.Unlock()
+}
+
+// broadcastFFT sends FFT data to all subscribers (non-blocking).
+func (r *Receiver) broadcastFFT(data []float32) {
+	r.subMu.Lock()
+	for ch := range r.fftSubs {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
+	r.subMu.Unlock()
+}
+
+// broadcastStatus sends a status update to all subscribers (non-blocking).
+func (r *Receiver) broadcastStatus(status Status) {
+	r.subMu.Lock()
+	for ch := range r.statSubs {
+		select {
+		case ch <- status:
+		default:
+		}
+	}
+	r.subMu.Unlock()
+}
 
 // Start starts the receiver processing loop.
 // This should be called after the source has started.
@@ -273,11 +364,7 @@ func (r *Receiver) processBlock(samples []complex128) {
 	if r.fftRate <= 0 || now.Sub(r.fftLastTime) >= time.Duration(float64(time.Second)/r.fftRate) {
 		fftData := r.spectrum.Compute(samples)
 		r.fftLastTime = now
-		select {
-		case r.fftCh <- fftData:
-		default:
-			// drop if no consumer
-		}
+		r.broadcastFFT(fftData)
 	}
 
 	// 2. DDC: frequency shift + decimation
@@ -327,11 +414,7 @@ func (r *Receiver) processBlock(samples []complex128) {
 		}
 
 		audioBlock := AudioBlock{Left: leftF32, Right: rightF32}
-		select {
-		case r.audioCh <- audioBlock:
-		default:
-			// drop if no consumer
-		}
+		r.broadcastAudio(audioBlock)
 	}
 }
 
@@ -457,27 +540,10 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 	}
 }
 
-// sendStatus sends a status update.
+// sendStatus sends a status update to all subscribers.
 func (r *Receiver) sendStatus() {
-	r.mu.Lock()
-	status := Status{
-		CenterFreq:   r.source.GetCenterFreq(),
-		SampleRate:   r.source.GetSampleRate(),
-		SignalLevel:  r.signalLevel,
-		SquelchOpen:  r.squelchOpen,
-		Demod:        r.demodType.String(),
-		FilterLow:    r.filterLow,
-		FilterHigh:   r.filterHigh,
-		FilterOffset: r.filterOffset,
-		CWOffset:     r.cwOffset,
-		FilterShape:  filterShapeName(r.filterShape),
-	}
-	r.mu.Unlock()
-
-	select {
-	case r.statusCh <- status:
-	default:
-	}
+	status := r.GetStatus()
+	r.broadcastStatus(status)
 }
 
 // --- Control methods ---
@@ -637,16 +703,26 @@ func (r *Receiver) GetStatus() Status {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return Status{
-		CenterFreq:   r.source.GetCenterFreq(),
-		SampleRate:   r.source.GetSampleRate(),
-		SignalLevel:  r.signalLevel,
-		SquelchOpen:  r.squelchOpen,
-		Demod:        r.demodType.String(),
-		FilterLow:    r.filterLow,
-		FilterHigh:   r.filterHigh,
-		FilterOffset: r.filterOffset,
-		CWOffset:     r.cwOffset,
-		FilterShape:  filterShapeName(r.filterShape),
+		CenterFreq:     r.source.GetCenterFreq(),
+		SampleRate:     r.source.GetSampleRate(),
+		SignalLevel:    r.signalLevel,
+		SquelchOpen:    r.squelchOpen,
+		Demod:          r.demodType.String(),
+		FilterLow:      r.filterLow,
+		FilterHigh:     r.filterHigh,
+		FilterOffset:   r.filterOffset,
+		CWOffset:       r.cwOffset,
+		FilterShape:    filterShapeName(r.filterShape),
+		SquelchLevel:   r.squelchLevel,
+		SpectrumAvg:    r.spectrum.avg,
+		FFTRate:        r.fftRate,
+		FFTMaxHold:     r.spectrum.maxHold,
+		FFTSize:        r.spectrum.Size(),
+		AutoGain:       r.config.AutoGain,
+		Gain:           r.config.Gain,
+		FreqCorrection: r.config.FreqCorrection,
+		AGCOn:          r.config.AGCOn,
+		AGCPreset:      r.agc.GetPreset().String(),
 	}
 }
 

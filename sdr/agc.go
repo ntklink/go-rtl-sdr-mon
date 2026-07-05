@@ -12,6 +12,7 @@ type AGC struct {
 	slope      float64 // dB
 	decay      float64 // decay rate (ms)
 	manualGain float64
+	preset     AGCPreset // current preset
 
 	// State
 	gain        float64
@@ -33,6 +34,7 @@ func NewAGC(sampleRate float64) *AGC {
 		gain:       1.0,
 		peakHold:   0,
 		sampleRate: sampleRate,
+		preset:     AGCPresetMedium,
 	}
 }
 
@@ -92,6 +94,7 @@ func (p AGCPreset) String() string {
 // SetPreset configures the AGC with one of the standard presets.
 // Values match gqrx's CAgcOptions presets exactly.
 func (a *AGC) SetPreset(preset AGCPreset) {
+	a.preset = preset
 	switch preset {
 	case AGCPresetSlow:
 		a.enabled = true
@@ -118,6 +121,11 @@ func (a *AGC) SetPreset(preset AGCPreset) {
 	if a.enabled {
 		a.gain = 1.0
 	}
+}
+
+// GetPreset returns the current AGC preset.
+func (a *AGC) GetPreset() AGCPreset {
+	return a.preset
 }
 
 // SetManualGain sets the manual gain (used when AGC is off).
