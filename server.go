@@ -35,9 +35,12 @@ func formatGain(gain int) string {
 	return fmt.Sprintf("%.1f dB", float64(gain)/10.0)
 }
 
-// demodOptions returns the list of available demodulator names.
+// demodOptions returns the list of available demodulator names (matches gqrx order).
 func demodOptions() []string {
-	return []string{"NFM", "WFM", "WFM-Stereo", "AM", "AM-Sync", "SSB", "OFF"}
+	return []string{
+		"OFF", "Raw I/Q", "AM", "AM-Sync", "LSB", "USB",
+		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT",
+	}
 }
 
 // floatToInt16 converts a float32 sample to int16 with clamping.
@@ -84,6 +87,13 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	api.POST("/auto-gain", s.handleSetAutoGain)
 	api.POST("/freq-correction", s.handleSetFreqCorrection)
 	api.POST("/spectrum-avg", s.handleSetSpectrumAvg)
+	api.POST("/fft-size", s.handleSetFFTSize)
+	api.POST("/fft-rate", s.handleSetFFTRate)
+	api.POST("/fft-max-hold", s.handleSetFFTMaxHold)
+	api.POST("/agc-preset", s.handleSetAGCPreset)
+	api.POST("/cw-offset", s.handleSetCWOffset)
+	api.POST("/filter-shape", s.handleSetFilterShape)
+	api.POST("/filter-preset", s.handleSetFilterPreset)
 
 	// WebSocket endpoints
 	api.GET("/ws/fft", s.handleWSFFT)
@@ -143,20 +153,30 @@ func (s *Server) handleSetDemod(c echo.Context) error {
 
 	var dt sdr.DemodType
 	switch req.Demod {
+	case "OFF", "off":
+		dt = sdr.DemodOff
+	case "Raw I/Q", "Raw", "raw":
+		dt = sdr.DemodRaw
+	case "AM", "am":
+		dt = sdr.DemodAM
+	case "AM-Sync", "am-sync", "AMSync":
+		dt = sdr.DemodAMSync
+	case "LSB", "lsb":
+		dt = sdr.DemodLSB
+	case "USB", "usb":
+		dt = sdr.DemodUSB
+	case "CW-L", "cw-l", "CWL":
+		dt = sdr.DemodCWL
+	case "CW-U", "cw-u", "CWU":
+		dt = sdr.DemodCWU
 	case "NFM", "nfm", "FM", "fm":
 		dt = sdr.DemodNFM
 	case "WFM", "wfm":
 		dt = sdr.DemodWFM
 	case "WFM-Stereo", "wfm-stereo", "WFMS":
 		dt = sdr.DemodWFMStereo
-	case "AM", "am":
-		dt = sdr.DemodAM
-	case "AM-Sync", "am-sync", "AMSync":
-		dt = sdr.DemodAMSync
-	case "SSB", "ssb", "USB", "usb", "LSB", "lsb":
-		dt = sdr.DemodSSB
-	case "OFF", "off", "NONE", "none":
-		dt = sdr.DemodNone
+	case "WFM-OIRT", "wfm-oirt", "WFMO":
+		dt = sdr.DemodWFMOirt
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown demod type"})
 	}
@@ -274,6 +294,128 @@ func (s *Server) handleSetSpectrumAvg(c echo.Context) error {
 	}
 	s.receiver.SetSpectrumAvg(req.Avg)
 	return c.JSON(http.StatusOK, req)
+}
+
+type fftSizeRequest struct {
+	Size int `json:"size"`
+}
+
+func (s *Server) handleSetFFTSize(c echo.Context) error {
+	var req fftSizeRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	s.receiver.SetFFTSize(req.Size)
+	return c.JSON(http.StatusOK, req)
+}
+
+type fftRateRequest struct {
+	Rate float64 `json:"rate"`
+}
+
+func (s *Server) handleSetFFTRate(c echo.Context) error {
+	var req fftRateRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	s.receiver.SetFFTRate(req.Rate)
+	return c.JSON(http.StatusOK, req)
+}
+
+type fftMaxHoldRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (s *Server) handleSetFFTMaxHold(c echo.Context) error {
+	var req fftMaxHoldRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	s.receiver.SetFFTMaxHold(req.Enabled)
+	return c.JSON(http.StatusOK, req)
+}
+
+type agcPresetRequest struct {
+	Preset string `json:"preset"`
+}
+
+func (s *Server) handleSetAGCPreset(c echo.Context) error {
+	var req agcPresetRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	var preset sdr.AGCPreset
+	switch req.Preset {
+	case "off", "Off", "OFF":
+		preset = sdr.AGCPresetOff
+	case "slow", "Slow", "SLOW":
+		preset = sdr.AGCPresetSlow
+	case "medium", "Medium", "MEDIUM":
+		preset = sdr.AGCPresetMedium
+	case "fast", "Fast", "FAST":
+		preset = sdr.AGCPresetFast
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown AGC preset"})
+	}
+	s.receiver.SetAGCPreset(preset)
+	return c.JSON(http.StatusOK, map[string]string{"preset": preset.String()})
+}
+
+type cwOffsetRequest struct {
+	Offset float64 `json:"offset"`
+}
+
+func (s *Server) handleSetCWOffset(c echo.Context) error {
+	var req cwOffsetRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	s.receiver.SetCWOffset(req.Offset)
+	return c.JSON(http.StatusOK, req)
+}
+
+type filterShapeRequest struct {
+	Shape string `json:"shape"`
+}
+
+func (s *Server) handleSetFilterShape(c echo.Context) error {
+	var req filterShapeRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	var shape int
+	switch req.Shape {
+	case "soft", "Soft", "SOFT":
+		shape = sdr.FilterShapeSoft
+	case "sharp", "Sharp", "SHARP":
+		shape = sdr.FilterShapeSharp
+	default:
+		shape = sdr.FilterShapeNormal
+	}
+	s.receiver.SetFilterShape(shape)
+	return c.JSON(http.StatusOK, map[string]string{"shape": req.Shape})
+}
+
+type filterPresetRequest struct {
+	Preset string `json:"preset"`
+}
+
+func (s *Server) handleSetFilterPreset(c echo.Context) error {
+	var req filterPresetRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	var preset int
+	switch req.Preset {
+	case "wide", "Wide", "WIDE":
+		preset = sdr.FilterPresetWide
+	case "narrow", "Narrow", "NARROW":
+		preset = sdr.FilterPresetNarrow
+	default:
+		preset = sdr.FilterPresetNormal
+	}
+	s.receiver.SetFilterPreset(preset)
+	return c.JSON(http.StatusOK, map[string]string{"preset": req.Preset})
 }
 
 // --- WebSocket Handlers ---

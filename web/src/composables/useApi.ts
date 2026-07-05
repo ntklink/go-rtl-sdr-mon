@@ -34,5 +34,12 @@ export function useApi() {
     setAutoGain: (auto: boolean) => postJSON('/auto-gain', { auto }),
     setFreqCorrection: (ppm: number) => postJSON('/freq-correction', { ppm }),
     setSpectrumAvg: (avg: number) => postJSON('/spectrum-avg', { avg }),
+    setFFTSize: (size: number) => postJSON('/fft-size', { size }),
+    setFFTRate: (rate: number) => postJSON('/fft-rate', { rate }),
+    setFFTMaxHold: (enabled: boolean) => postJSON('/fft-max-hold', { enabled }),
+    setAGCPreset: (preset: string) => postJSON('/agc-preset', { preset }),
+    setCWOffset: (offset: number) => postJSON('/cw-offset', { offset }),
+    setFilterShape: (shape: string) => postJSON('/filter-shape', { shape }),
+    setFilterPreset: (preset: string) => postJSON('/filter-preset', { preset }),
   }
 }

@@ -23,6 +23,9 @@ type Source struct {
 	running bool
 	stopCh  chan struct{}
 
+	// bufferSize is the async read buffer size in bytes (0 = default).
+	bufferSize uint32
+
 	// sampleCh delivers complex64 IQ samples to the consumer.
 	sampleCh chan []complex128
 }
@@ -59,6 +62,7 @@ func OpenSource(index int, sampleRate, centerFreq uint32) (*Source, error) {
 		dev:        dev,
 		sampleRate: sampleRate,
 		centerFreq: centerFreq,
+		bufferSize: 147456, // 9×16384 bytes → ~24.4 fps at 1.8 MHz
 		stopCh:     make(chan struct{}),
 		sampleCh:   make(chan []complex128, 4),
 	}
@@ -128,14 +132,18 @@ func (s *Source) Start() error {
 		return fmt.Errorf("reset buffer: %w", err)
 	}
 
-	// Use async reading for better performance
+	// Use async reading with custom buffer size for ~25fps FFT rate
+	bufLen := s.bufferSize
+	if bufLen == 0 {
+		bufLen = 147456 // default: 9×16384
+	}
 	err := s.dev.ReadAsync(func(data []byte) {
 		samples := bytesToComplex(data)
 		select {
 		case s.sampleCh <- samples:
 		case <-s.stopCh:
 		}
-	}, 0, 0)
+	}, 0, bufLen)
 
 	s.mu.Lock()
 	s.running = false

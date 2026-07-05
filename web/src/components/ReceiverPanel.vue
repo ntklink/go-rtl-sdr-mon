@@ -44,16 +44,31 @@
     </div>
 
     <div class="control-group">
-      <label>滤波器预设</label>
+      <label>滤波器预设 (gqrx)</label>
       <div class="preset-buttons">
-        <button @click="setFilterPreset(-5000, 5000)">±5k</button>
-        <button @click="setFilterPreset(-10000, 10000)">±10k</button>
-        <button @click="setFilterPreset(-15000, 15000)">±15k</button>
-        <button @click="setFilterPreset(-75000, 75000)">WFM ±75k</button>
-        <button @click="setFilterPreset(-3000, 3000)">SSB ±3k</button>
-        <button @click="setFilterPreset(300, 3000)">USB</button>
-        <button @click="setFilterPreset(-3000, -300)">LSB</button>
+        <button @click="onFilterPreset('wide')">Wide</button>
+        <button @click="onFilterPreset('normal')">Normal</button>
+        <button @click="onFilterPreset('narrow')">Narrow</button>
       </div>
+    </div>
+
+    <div class="control-group">
+      <label>滤波器形状</label>
+      <SelectRoot v-model="filterShape" @update:model-value="onFilterShapeChange">
+        <SelectTrigger class="reka-select-trigger">
+          <SelectValue placeholder="选择..." />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </SelectTrigger>
+        <SelectPortal>
+          <SelectContent class="reka-select-content" position="popper" :side-offset="4">
+            <SelectItem value="soft" class="reka-select-item">Soft</SelectItem>
+            <SelectItem value="normal" class="reka-select-item">Normal</SelectItem>
+            <SelectItem value="sharp" class="reka-select-item">Sharp</SelectItem>
+          </SelectContent>
+        </SelectPortal>
+      </SelectRoot>
     </div>
 
     <div class="control-group">
@@ -97,8 +112,9 @@ const emit = defineEmits<{
   'update:filter': [low: number, high: number]
 }>()
 
-const demods = ['NFM', 'WFM', 'WFM-Stereo', 'AM', 'AM-Sync', 'SSB', 'OFF']
+const demods = ['OFF', 'Raw I/Q', 'AM', 'AM-Sync', 'LSB', 'USB', 'CW-L', 'CW-U', 'NFM', 'WFM', 'WFM-Stereo', 'WFM-OIRT']
 const squelchLevel = ref(-150)
+const filterShape = ref('normal')
 
 const selectedDemod = computed({
   get: () => props.demod,
@@ -122,6 +138,22 @@ async function onFilterHighChange(e: Event) {
 
 function setFilterPreset(low: number, high: number) {
   emit('update:filter', low, high)
+}
+
+async function onFilterPreset(preset: string) {
+  try {
+    await api.setFilterPreset(preset)
+  } catch (e) {
+    console.error('Set filter preset failed:', e)
+  }
+}
+
+async function onFilterShapeChange() {
+  try {
+    await api.setFilterShape(filterShape.value)
+  } catch (e) {
+    console.error('Set filter shape failed:', e)
+  }
 }
 
 async function onSquelchChange() {

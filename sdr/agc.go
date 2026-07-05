@@ -22,12 +22,13 @@ type AGC struct {
 }
 
 // NewAGC creates a new AGC with the given sample rate.
+// Defaults match gqrx: threshold=-100dB, slope=0dB, decay=500ms (medium).
 func NewAGC(sampleRate float64) *AGC {
 	return &AGC{
 		enabled:    false,
-		threshold:  -20,
-		slope:      2,
-		decay:      250,
+		threshold:  -100, // gqrx default
+		slope:      0,    // gqrx default
+		decay:      500,  // gqrx default (medium)
 		manualGain: 1.0,
 		gain:       1.0,
 		peakHold:   0,
@@ -62,6 +63,61 @@ func (a *AGC) SetSlope(slope float64) {
 func (a *AGC) SetDecay(decay float64) {
 	a.decay = decay
 	a.decayRate = math.Exp(-1.0 / (a.sampleRate * a.decay / 1000.0))
+}
+
+// AGCPreset represents an AGC preset.
+type AGCPreset int
+
+const (
+	AGCPresetOff    AGCPreset = 0
+	AGCPresetSlow   AGCPreset = 1
+	AGCPresetMedium AGCPreset = 2
+	AGCPresetFast   AGCPreset = 3
+)
+
+// String returns the name of the AGC preset.
+func (p AGCPreset) String() string {
+	switch p {
+	case AGCPresetSlow:
+		return "Slow"
+	case AGCPresetMedium:
+		return "Medium"
+	case AGCPresetFast:
+		return "Fast"
+	default:
+		return "Off"
+	}
+}
+
+// SetPreset configures the AGC with one of the standard presets.
+// Values match gqrx's CAgcOptions presets exactly.
+func (a *AGC) SetPreset(preset AGCPreset) {
+	switch preset {
+	case AGCPresetSlow:
+		a.enabled = true
+		a.threshold = -100 // gqrx default
+		a.slope = 0        // gqrx default
+		a.decay = 2000     // gqrx slow
+		a.hang = false
+	case AGCPresetMedium:
+		a.enabled = true
+		a.threshold = -100
+		a.slope = 0
+		a.decay = 500 // gqrx medium
+		a.hang = false
+	case AGCPresetFast:
+		a.enabled = true
+		a.threshold = -100
+		a.slope = 0
+		a.decay = 100 // gqrx fast
+		a.hang = false
+	default:
+		a.enabled = false
+	}
+	a.decayRate = math.Exp(-1.0 / (a.sampleRate * a.decay / 1000.0))
+	if a.enabled {
+		a.gain = 1.0
+	}
 }
 
 // SetManualGain sets the manual gain (used when AGC is off).

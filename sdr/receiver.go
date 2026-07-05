@@ -3,6 +3,7 @@ package sdr
 import (
 	"math"
 	"sync"
+	"time"
 
 	"github.com/ntklink/go-rtl-sdr-mon/sdr/demod"
 )
@@ -10,22 +11,58 @@ import (
 // DemodType re-exports the demod type from the demod package for convenience.
 type DemodType = demod.DemodType
 
-// Demod constants (re-exported for API use).
+// Demod constants (re-exported for API use). Values match gqrx DockRxOpt enum.
 const (
-	DemodNone      = demod.DemodNone
-	DemodAM        = demod.DemodAM
-	DemodNFM       = demod.DemodNFM
-	DemodWFM       = demod.DemodWFM
-	DemodWFMStereo = demod.DemodWFMStereo
-	DemodSSB       = demod.DemodSSB
-	DemodAMSync    = demod.DemodAMSync
+	DemodOff       = demod.DemodOff       // 0
+	DemodRaw       = demod.DemodRaw       // 1 - Raw I/Q
+	DemodAM        = demod.DemodAM        // 2
+	DemodAMSync    = demod.DemodAMSync    // 3
+	DemodLSB       = demod.DemodLSB       // 4
+	DemodUSB       = demod.DemodUSB       // 5
+	DemodCWL       = demod.DemodCWL       // 6
+	DemodCWU       = demod.DemodCWU       // 7
+	DemodNFM       = demod.DemodNFM       // 8
+	DemodWFM       = demod.DemodWFM       // 9
+	DemodWFMStereo = demod.DemodWFMStereo // 10
+	DemodWFMOirt   = demod.DemodWFMOirt   // 11
 )
 
 // AudioRate is the standard audio output sample rate.
 const AudioRate = 48000
 
 // TargetQuadRate is the target quadrature rate after DDC decimation.
-const TargetQuadRate = 250000
+const TargetQuadRate = 240000
+
+// Filter shape constants (match gqrx filter_shape enum).
+const (
+	FilterShapeSoft   = 0 // 50% transition band
+	FilterShapeNormal = 1 // 20% transition band (gqrx default)
+	FilterShapeSharp  = 2 // 10% transition band
+)
+
+// Filter preset constants.
+const (
+	FilterPresetWide   = 0
+	FilterPresetNormal = 1
+	FilterPresetNarrow = 2
+)
+
+// filterPresetTable defines the filter low/high cutoffs (Hz) for each
+// demod mode and preset (Wide/Normal/Narrow). Values match gqrx exactly.
+var filterPresetTable = map[DemodType][3][2]float64{
+	DemodOff:       {{0, 0}, {0, 0}, {0, 0}},
+	DemodRaw:       {{-15000, 15000}, {-5000, 5000}, {-1000, 1000}},
+	DemodAM:        {{-10000, 10000}, {-5000, 5000}, {-2500, 2500}},
+	DemodAMSync:    {{-10000, 10000}, {-5000, 5000}, {-2500, 2500}},
+	DemodLSB:       {{-4000, -100}, {-2800, -100}, {-2400, -300}},
+	DemodUSB:       {{100, 4000}, {100, 2800}, {300, 2400}},
+	DemodCWL:       {{-1000, 1000}, {-250, 250}, {-100, 100}},
+	DemodCWU:       {{-1000, 1000}, {-250, 250}, {-100, 100}},
+	DemodNFM:       {{-10000, 10000}, {-5000, 5000}, {-2500, 2500}},
+	DemodWFM:       {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
+	DemodWFMStereo: {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
+	DemodWFMOirt:   {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
+}
 
 // ReceiverConfig holds configuration for the receiver.
 type ReceiverConfig struct {
@@ -34,6 +71,7 @@ type ReceiverConfig struct {
 	FilterLow      float64 // Hz relative to center
 	FilterHigh     float64 // Hz relative to center
 	FilterOffset   float64 // Hz, offset from center frequency
+	CWOffset       float64 // Hz, CW/BFO offset (gqrx default: 700)
 	Demod          DemodType
 	SquelchLevel   float64 // dBFS, -150 = open
 	AGCOn          bool
@@ -42,16 +80,17 @@ type ReceiverConfig struct {
 	FreqCorrection int // ppm
 }
 
-// DefaultReceiverConfig returns a default configuration.
+// DefaultReceiverConfig returns a default configuration matching gqrx defaults.
 func DefaultReceiverConfig() ReceiverConfig {
 	return ReceiverConfig{
-		SampleRate:     2400000,
-		CenterFreq:     100000000, // 100 MHz
-		FilterLow:      -5000,
-		FilterHigh:     5000,
+		SampleRate:     1800000,   // 1.8 MHz (gqrx default)
+		CenterFreq:     102800000, // 102.8 MHz
+		FilterLow:      -80000,    // ±80 kHz for WFM (NORMAL preset)
+		FilterHigh:     80000,
 		FilterOffset:   0,
-		Demod:          DemodNFM,
-		SquelchLevel:   -150,
+		CWOffset:       700, // gqrx default CW offset (Hz)
+		Demod:          DemodWFM,
+		SquelchLevel:   -150, // open
 		AGCOn:          true,
 		AutoGain:       true,
 		FreqCorrection: 0,
@@ -70,12 +109,16 @@ type Receiver struct {
 	demod     demod.Demodulator
 	demodType DemodType
 
-	// Bandpass filter (applied after DDC, before demod)
-	bpFilter     *FIRFilter
-	bpComplex    *FIRComplexFilter
+	// Filter
 	filterLow    float64
 	filterHigh   float64
 	filterOffset float64
+	filterShape  int     // FilterShapeSoft/Normal/Sharp
+	cwOffset     float64 // CW/BFO offset in Hz
+
+	// Bandpass filter (applied after DDC, before demod)
+	bpFilter  *FIRFilter
+	bpComplex *FIRComplexFilter
 
 	// Squelch
 	squelchLevel float64
@@ -91,8 +134,11 @@ type Receiver struct {
 	audioCh  chan AudioBlock
 	statusCh chan Status
 
-	running bool
-	stopCh  chan struct{}
+	// FFT rate limiting
+	fftRate     float64   // target FFT rate in fps
+	fftLastTime time.Time // last FFT output time
+	running     bool
+	stopCh      chan struct{}
 
 	// Configuration
 	config ReceiverConfig
@@ -114,24 +160,29 @@ type Status struct {
 	FilterLow    float64
 	FilterHigh   float64
 	FilterOffset float64
+	CWOffset     float64
+	FilterShape  string
 }
 
 // NewReceiver creates a new receiver with the given source and config.
 func NewReceiver(source *Source, config ReceiverConfig) *Receiver {
 	r := &Receiver{
 		source:       source,
-		spectrum:     NewSpectrumFFT(2048, 0.3),
-		ddc:          NewDDC(float64(config.SampleRate), config.FilterOffset, TargetQuadRate),
+		spectrum:     NewSpectrumFFT(8192, 0.3),
+		ddc:          NewDDC(float64(config.SampleRate), config.FilterOffset-config.CWOffset, TargetQuadRate),
 		agc:          NewAGC(TargetQuadRate),
 		config:       config,
 		squelchLevel: config.SquelchLevel,
 		filterLow:    config.FilterLow,
 		filterHigh:   config.FilterHigh,
 		filterOffset: config.FilterOffset,
+		filterShape:  FilterShapeNormal,
+		cwOffset:     config.CWOffset,
 		fftCh:        make(chan []float32, 2),
 		audioCh:      make(chan AudioBlock, 4),
 		statusCh:     make(chan Status, 1),
 		stopCh:       make(chan struct{}),
+		fftRate:      25.0, // 25 fps (gqrx default)
 	}
 
 	// Set up audio resamplers
@@ -139,8 +190,9 @@ func NewReceiver(source *Source, config ReceiverConfig) *Receiver {
 	r.audioResampler = NewResampler(quadRate, AudioRate)
 	r.audioResamplerR = NewResampler(quadRate, AudioRate)
 
-	// Set up AGC
-	r.agc.SetEnabled(config.AGCOn)
+	// Set up AGC with medium preset (gqrx default)
+	r.agc.SetPreset(AGCPresetMedium)
+	r.config.AGCOn = true
 
 	// Set up demodulator
 	r.setDemodulator(config.Demod)
@@ -216,12 +268,16 @@ func (r *Receiver) processBlock(samples []complex128) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// 1. Compute spectrum (FFT)
-	fftData := r.spectrum.Compute(samples)
-	select {
-	case r.fftCh <- fftData:
-	default:
-		// drop if no consumer
+	// 1. Compute spectrum (FFT) — rate limited
+	now := time.Now()
+	if r.fftRate <= 0 || now.Sub(r.fftLastTime) >= time.Duration(float64(time.Second)/r.fftRate) {
+		fftData := r.spectrum.Compute(samples)
+		r.fftLastTime = now
+		select {
+		case r.fftCh <- fftData:
+		default:
+			// drop if no consumer
+		}
 	}
 
 	// 2. DDC: frequency shift + decimation
@@ -334,7 +390,14 @@ func (r *Receiver) updateFilter() {
 	// Design complex bandpass filter centered at 0
 	// Actually, we use a real bandpass since the signal is already at baseband
 	// after DDC. We need a bandpass that passes [low, high].
-	numTaps := 65
+	// Number of taps depends on filter shape (more taps = sharper)
+	numTaps := 65 // NORMAL default
+	switch r.filterShape {
+	case FilterShapeSoft:
+		numTaps = 33
+	case FilterShapeSharp:
+		numTaps = 127
+	}
 	if low < 0 && high > 0 {
 		// Bandpass includes DC, so use a lowpass with cutoff = high
 		taps := DesignLowpass(sampleRate, high, numTaps)
@@ -354,7 +417,9 @@ func (r *Receiver) updateFilter() {
 	}
 }
 
-// setDemodulator creates the appropriate demodulator for the given type.
+// setDemodulator creates the appropriate demodulator for the given type
+// and auto-adjusts the filter bandwidth to the NORMAL preset for that mode
+// (matching gqrx behavior exactly).
 func (r *Receiver) setDemodulator(dt DemodType) {
 	r.demodType = dt
 	quadRate := r.ddc.QuadRate()
@@ -363,17 +428,32 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 	case DemodNFM:
 		r.demod = demod.NewFMDemod(quadRate, 5000, 75e-6)
 	case DemodWFM:
-		r.demod = demod.NewWFMDemod(quadRate, 75000, false)
+		r.demod = demod.NewWFMDemod(quadRate, 75000, false, false)
 	case DemodWFMStereo:
-		r.demod = demod.NewWFMDemod(quadRate, 75000, true)
+		r.demod = demod.NewWFMDemod(quadRate, 75000, true, false)
+	case DemodWFMOirt:
+		r.demod = demod.NewWFMDemod(quadRate, 75000, true, true)
 	case DemodAM:
 		r.demod = demod.NewAMDemod(quadRate, true)
 	case DemodAMSync:
 		r.demod = demod.NewAMSyncDemod(quadRate, true, 0.001)
-	case DemodSSB:
+	case DemodLSB, DemodUSB, DemodCWL, DemodCWU:
+		// SSB/CW demodulation: take the real part. Sideband selection
+		// is done by the bandpass filter (asymmetric for LSB/USB).
 		r.demod = demod.NewSSBDemod(quadRate)
-	case DemodNone:
+	case DemodRaw:
+		// Raw I/Q: pass through without demodulation
+		r.demod = demod.NewSSBDemod(quadRate) // real part = I channel
+	case DemodOff:
 		r.demod = nil
+	}
+
+	// Apply NORMAL filter preset for this mode (gqrx default behavior)
+	if dt != DemodOff {
+		preset := filterPresetTable[dt]
+		r.filterLow = preset[FilterPresetNormal][0]
+		r.filterHigh = preset[FilterPresetNormal][1]
+		r.updateFilter()
 	}
 }
 
@@ -389,6 +469,8 @@ func (r *Receiver) sendStatus() {
 		FilterLow:    r.filterLow,
 		FilterHigh:   r.filterHigh,
 		FilterOffset: r.filterOffset,
+		CWOffset:     r.cwOffset,
+		FilterShape:  filterShapeName(r.filterShape),
 	}
 	r.mu.Unlock()
 
@@ -409,11 +491,42 @@ func (r *Receiver) SetCenterFreq(freq uint32) error {
 }
 
 // SetFilterOffset sets the filter offset (tuning within passband).
+// The DDC center frequency is filterOffset - cwOffset (matching gqrx).
 func (r *Receiver) SetFilterOffset(offset float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.filterOffset = offset
-	r.ddc.SetCenterFreq(offset)
+	r.ddc.SetCenterFreq(offset - r.cwOffset)
+}
+
+// SetCWOffset sets the CW/BFO offset in Hz (gqrx default: 700).
+func (r *Receiver) SetCWOffset(offset float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cwOffset = offset
+	r.config.CWOffset = offset
+	r.ddc.SetCenterFreq(r.filterOffset - offset)
+}
+
+// SetFilterShape sets the filter shape (SOFT/NORMAL/SHARP).
+func (r *Receiver) SetFilterShape(shape int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.filterShape = shape
+	r.updateFilter()
+}
+
+// SetFilterPreset applies a WIDE/NORMAL/NARROW preset for the current demod mode.
+func (r *Receiver) SetFilterPreset(preset int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.demodType == DemodOff {
+		return
+	}
+	p := filterPresetTable[r.demodType]
+	r.filterLow = p[preset][0]
+	r.filterHigh = p[preset][1]
+	r.updateFilter()
 }
 
 // SetFilter sets the filter bandwidth.
@@ -478,6 +591,35 @@ func (r *Receiver) SetSpectrumAvg(avg float64) {
 	r.spectrum.SetAvg(avg)
 }
 
+// SetFFTSize sets the FFT size.
+func (r *Receiver) SetFFTSize(size int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.spectrum = NewSpectrumFFT(size, r.spectrum.avg)
+}
+
+// SetFFTRate sets the FFT update rate in fps (0 = unlimited).
+func (r *Receiver) SetFFTRate(fps float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fftRate = fps
+}
+
+// SetFFTMaxHold enables or disables max-hold plot mode.
+func (r *Receiver) SetFFTMaxHold(on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.spectrum.SetMaxHold(on)
+}
+
+// SetAGCPreset sets the AGC to one of the standard presets.
+func (r *Receiver) SetAGCPreset(preset AGCPreset) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.agc.SetPreset(preset)
+	r.config.AGCOn = preset != AGCPresetOff
+}
+
 // GetSpectrumSize returns the FFT size.
 func (r *Receiver) GetSpectrumSize() int {
 	return r.spectrum.Size()
@@ -503,5 +645,19 @@ func (r *Receiver) GetStatus() Status {
 		FilterLow:    r.filterLow,
 		FilterHigh:   r.filterHigh,
 		FilterOffset: r.filterOffset,
+		CWOffset:     r.cwOffset,
+		FilterShape:  filterShapeName(r.filterShape),
+	}
+}
+
+// filterShapeName returns the name of a filter shape.
+func filterShapeName(shape int) string {
+	switch shape {
+	case FilterShapeSoft:
+		return "Soft"
+	case FilterShapeSharp:
+		return "Sharp"
+	default:
+		return "Normal"
 	}
 }

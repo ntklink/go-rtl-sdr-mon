@@ -2,21 +2,26 @@ package sdr
 
 import (
 	"math"
+	"time"
 )
 
 // SpectrumFFT computes magnitude spectra for waterfall/spectrum display.
 type SpectrumFFT struct {
-	size    int
-	window  []float64
-	prevMag []float64 // for averaging
-	avg     float64   // averaging factor (0..1), higher = more averaging
+	size     int
+	window   []float64
+	prevMag  []float64 // for averaging
+	avg      float64   // averaging factor (0..1), higher = more averaging
+	maxHold  bool      // max-hold plot mode
+	maxMag   []float64 // max-hold buffer
+	maxDecay float64   // max-hold decay rate (dB per second)
+	lastTime float64   // timestamp of last compute (for decay calc)
 }
 
 // NewSpectrumFFT creates a new FFT processor with the given size.
 // A Hann window is applied before the FFT.
 func NewSpectrumFFT(size int, avg float64) *SpectrumFFT {
 	if size <= 0 {
-		size = 2048
+		size = 8192
 	}
 	// Round to next power of 2
 	size = nextPow2(size)
@@ -27,10 +32,12 @@ func NewSpectrumFFT(size int, avg float64) *SpectrumFFT {
 	}
 
 	return &SpectrumFFT{
-		size:    size,
-		window:  w,
-		prevMag: make([]float64, size),
-		avg:     avg,
+		size:     size,
+		window:   w,
+		prevMag:  make([]float64, size),
+		maxMag:   make([]float64, size),
+		avg:      avg,
+		maxDecay: 6.0, // 6 dB/s decay
 	}
 }
 
@@ -48,6 +55,16 @@ func (f *SpectrumFFT) SetAvg(avg float64) {
 		avg = 0.99
 	}
 	f.avg = avg
+}
+
+// SetMaxHold enables or disables max-hold plot mode.
+func (f *SpectrumFFT) SetMaxHold(on bool) {
+	f.maxHold = on
+	if !on {
+		for i := range f.maxMag {
+			f.maxMag[i] = 0
+		}
+	}
 }
 
 // Compute computes the power spectrum in dBFS from complex samples.
@@ -75,6 +92,13 @@ func (f *SpectrumFFT) Compute(samples []complex128) []float32 {
 	out := make([]float32, n)
 	half := n / 2
 	norm := 1.0 / float64(n)
+	now := float64(time.Now().UnixNano()) / 1e9
+	dt := 0.0
+	if f.lastTime > 0 {
+		dt = now - f.lastTime
+	}
+	f.lastTime = now
+
 	for i := 0; i < n; i++ {
 		mag := cmplxAbs(coeffs[i]) * norm
 		db := 20.0 * math.Log10(mag+1e-12)
@@ -82,7 +106,18 @@ func (f *SpectrumFFT) Compute(samples []complex128) []float32 {
 		idx := (i + half) % n
 		// Apply averaging
 		f.prevMag[idx] = f.avg*f.prevMag[idx] + (1-f.avg)*db
-		out[idx] = float32(f.prevMag[idx])
+
+		if f.maxHold {
+			// Decay previous max
+			f.maxMag[idx] -= f.maxDecay * dt
+			// Keep max
+			if f.prevMag[idx] > f.maxMag[idx] {
+				f.maxMag[idx] = f.prevMag[idx]
+			}
+			out[idx] = float32(f.maxMag[idx])
+		} else {
+			out[idx] = float32(f.prevMag[idx])
+		}
 	}
 
 	// Return only the positive half (already shifted, so take full)

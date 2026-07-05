@@ -21,11 +21,11 @@ var content embed.FS
 func main() {
 	// CLI flags
 	deviceIndex := flag.Int("device", 0, "RTL-SDR device index")
-	sampleRate := flag.Uint("samplerate", 2400000, "Sample rate in Hz")
-	frequency := flag.Uint("freq", 100000000, "Center frequency in Hz (default: 100 MHz)")
+	sampleRate := flag.Uint("samplerate", 1800000, "Sample rate in Hz (gqrx default: 1.8 MHz)")
+	frequency := flag.Uint("freq", 102800000, "Center frequency in Hz (default: 102.8 MHz)")
 	port := flag.Int("port", 8080, "HTTP server port")
 	autoGain := flag.Bool("autogain", true, "Enable auto gain")
-	gain := flag.Int("gain", 0, "Manual gain in tenths of dB (e.g., 115 = 11.5 dB)")
+	gain := flag.Int("gain", 248, "Manual gain in tenths of dB (248 = 24.8 dB, gqrx default)")
 	ppm := flag.Int("ppm", 0, "Frequency correction in ppm")
 	flag.Parse()
 

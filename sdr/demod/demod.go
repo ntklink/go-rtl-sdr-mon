@@ -1,35 +1,51 @@
 package demod
 
 // DemodType identifies a demodulator type.
+// Values and order match gqrx's DockRxOpt::rxopt_mode_idx enum.
 type DemodType int
 
 const (
-	DemodNone DemodType = iota
-	DemodAM
-	DemodNFM // narrow FM
-	DemodWFM // wide FM (broadcast)
-	DemodWFMStereo
-	DemodSSB // SSB (USB/LSB selected by filter offset sign)
-	DemodAMSync
+	DemodOff       DemodType = iota // 0  - Demod Off
+	DemodRaw                        // 1  - Raw I/Q (no demod)
+	DemodAM                         // 2  - AM
+	DemodAMSync                     // 3  - AM-Sync
+	DemodLSB                        // 4  - LSB (Lower Sideband)
+	DemodUSB                        // 5  - USB (Upper Sideband)
+	DemodCWL                        // 6  - CW-L (CW Lower)
+	DemodCWU                        // 7  - CW-U (CW Upper)
+	DemodNFM                        // 8  - Narrow FM
+	DemodWFM                        // 9  - WFM (mono)
+	DemodWFMStereo                  // 10 - WFM (stereo)
+	DemodWFMOirt                    // 11 - WFM (oirt stereo)
 )
 
 // String returns the name of the demodulator type.
 func (d DemodType) String() string {
 	switch d {
-	case DemodNone:
-		return "NONE"
+	case DemodOff:
+		return "OFF"
+	case DemodRaw:
+		return "Raw I/Q"
 	case DemodAM:
 		return "AM"
+	case DemodAMSync:
+		return "AM-Sync"
+	case DemodLSB:
+		return "LSB"
+	case DemodUSB:
+		return "USB"
+	case DemodCWL:
+		return "CW-L"
+	case DemodCWU:
+		return "CW-U"
 	case DemodNFM:
 		return "NFM"
 	case DemodWFM:
 		return "WFM"
 	case DemodWFMStereo:
 		return "WFM-Stereo"
-	case DemodSSB:
-		return "SSB"
-	case DemodAMSync:
-		return "AM-Sync"
+	case DemodWFMOirt:
+		return "WFM-OIRT"
 	default:
 		return "Unknown"
 	}

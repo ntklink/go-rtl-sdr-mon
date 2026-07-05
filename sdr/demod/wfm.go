@@ -13,10 +13,11 @@ type WFMDemod struct {
 	maxDev   float64
 	gain     float64
 	stereo   bool
+	oirt     bool // OIRT stereo standard (31.25kHz pilot)
 
 	prevSample complex128
 
-	// De-emphasis
+	// De-emphasis (only for stereo, gqrx disables for mono)
 	deemphL *iirFilter
 	deemphR *iirFilter
 
@@ -25,8 +26,9 @@ type WFMDemod struct {
 	pilotFreq  float64 // rad/sample
 	pilotGain  float64
 	pilotAlpha float64
+	pilotHz    float64 // nominal pilot frequency in Hz
 
-	// Audio low-pass (15kHz for L+R, 53kHz for composite before stereo extraction)
+	// Audio low-pass
 	audioLP *iirFilter
 }
 
@@ -34,15 +36,24 @@ type WFMDemod struct {
 // quadRate is the input sample rate (typically 240kHz).
 // maxDev is the maximum deviation (75000 Hz for broadcast FM).
 // stereo enables stereo demodulation.
-func NewWFMDemod(quadRate, maxDev float64, stereo bool) *WFMDemod {
+// oirt selects the OIRT stereo standard (31.25kHz pilot) instead of standard (19kHz).
+func NewWFMDemod(quadRate, maxDev float64, stereo, oirt bool) *WFMDemod {
 	d := &WFMDemod{
 		quadRate: quadRate,
 		maxDev:   maxDev,
 		stereo:   stereo,
+		oirt:     oirt,
 		gain:     quadRate / (2 * math.Pi * maxDev),
 	}
 
-	// De-emphasis (50us for Europe, 75us for US)
+	// Pilot frequency: 19kHz standard, 31.25kHz OIRT
+	if oirt {
+		d.pilotHz = 31250.0
+	} else {
+		d.pilotHz = 19000.0
+	}
+
+	// De-emphasis (50µs, only applied for stereo — gqrx disables for mono)
 	tau := 50e-6
 	dt := 1.0 / quadRate
 	alpha := dt / (tau + dt)
@@ -50,14 +61,16 @@ func NewWFMDemod(quadRate, maxDev float64, stereo bool) *WFMDemod {
 	d.deemphR = newIIR([]float64{alpha}, []float64{1.0, -(1 - alpha)})
 
 	// Pilot PLL parameters
-	// 19kHz pilot at quadRate sample rate
-	pilotFreqHz := 19000.0
-	d.pilotFreq = 2 * math.Pi * pilotFreqHz / quadRate
+	d.pilotFreq = 2 * math.Pi * d.pilotHz / quadRate
 	d.pilotGain = 0.001
 	d.pilotAlpha = 0.0001
 
-	// Audio low-pass filter (15kHz cutoff)
-	audioAlpha := dt / (1.0/(2*math.Pi*15000) + dt)
+	// Audio low-pass filter: 17kHz standard, 15kHz OIRT (matches gqrx stereo_demod)
+	cutoffHz := 17000.0
+	if oirt {
+		cutoffHz = 15000.0
+	}
+	audioAlpha := dt / (1.0/(2*math.Pi*cutoffHz) + dt)
 	d.audioLP = newIIR([]float64{audioAlpha}, []float64{1.0, -(1 - audioAlpha)})
 
 	return d
@@ -65,6 +78,9 @@ func NewWFMDemod(quadRate, maxDev float64, stereo bool) *WFMDemod {
 
 // Type returns the demodulator type.
 func (d *WFMDemod) Type() DemodType {
+	if d.oirt {
+		return DemodWFMOirt
+	}
 	if d.stereo {
 		return DemodWFMStereo
 	}
@@ -75,7 +91,7 @@ func (d *WFMDemod) Type() DemodType {
 func (d *WFMDemod) SetQuadRate(rate float64) {
 	d.quadRate = rate
 	d.gain = rate / (2 * math.Pi * d.maxDev)
-	d.pilotFreq = 2 * math.Pi * 19000 / rate
+	d.pilotFreq = 2 * math.Pi * d.pilotHz / rate
 }
 
 // QuadRate returns the current quadrature rate.
@@ -109,9 +125,8 @@ func (d *WFMDemod) Process(in []complex128) (left, right []float64) {
 	}
 
 	if !d.stereo {
-		// Mono: just low-pass filter and de-emphasis
+		// Mono: just low-pass filter, NO de-emphasis (gqrx wfmrx mono has none)
 		mono := d.audioLP.filterSlice(demod)
-		mono = d.deemphL.filterSlice(mono)
 		return mono, nil
 	}
 
@@ -132,7 +147,7 @@ func (d *WFMDemod) Process(in []complex128) (left, right []float64) {
 
 		d.pilotFreq += d.pilotAlpha * err
 		// Limit PLL frequency range
-		nominalFreq := 2 * math.Pi * 19000 / d.quadRate
+		nominalFreq := 2 * math.Pi * d.pilotHz / d.quadRate
 		maxDev := 2 * math.Pi * 100 / d.quadRate // ±100Hz
 		if d.pilotFreq > nominalFreq+maxDev {
 			d.pilotFreq = nominalFreq + maxDev

@@ -11,6 +11,26 @@
       </div>
     </div>
 
+    <div class="control-group">
+      <label>AGC 预设</label>
+      <SelectRoot v-model="agcPreset" @update:model-value="onAGCPresetChange">
+        <SelectTrigger class="reka-select-trigger">
+          <SelectValue placeholder="选择..." />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </SelectTrigger>
+        <SelectPortal>
+          <SelectContent class="reka-select-content" position="popper" :side-offset="4">
+            <SelectItem value="off" class="reka-select-item">Off</SelectItem>
+            <SelectItem value="slow" class="reka-select-item">Slow</SelectItem>
+            <SelectItem value="medium" class="reka-select-item">Medium</SelectItem>
+            <SelectItem value="fast" class="reka-select-item">Fast</SelectItem>
+          </SelectContent>
+        </SelectPortal>
+      </SelectRoot>
+    </div>
+
     <div v-if="!autoGain" class="control-group">
       <label>手动增益</label>
       <div class="slider-row">
@@ -63,6 +83,52 @@
         <span class="value-display">{{ spectrumAvg.toFixed(2) }}</span>
       </div>
     </div>
+
+    <div class="control-group">
+      <label>FFT 大小</label>
+      <SelectRoot v-model="fftSizeStr" @update:model-value="onFFTSizeChange">
+        <SelectTrigger class="reka-select-trigger">
+          <SelectValue placeholder="选择..." />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </SelectTrigger>
+        <SelectPortal>
+          <SelectContent class="reka-select-content" position="popper" :side-offset="4">
+            <SelectItem v-for="s in fftSizes" :key="s" :value="String(s)" class="reka-select-item">{{ s }}</SelectItem>
+          </SelectContent>
+        </SelectPortal>
+      </SelectRoot>
+    </div>
+
+    <div class="control-group">
+      <label>FFT 刷新率 (fps)</label>
+      <div class="slider-row">
+        <SliderRoot
+          v-model="fftRateSlider"
+          :min="1"
+          :max="60"
+          :step="1"
+          class="reka-slider-root"
+          @update:model-value="onFFTRateChange"
+        >
+          <SliderTrack class="reka-slider-track">
+            <SliderRange class="reka-slider-range" />
+          </SliderTrack>
+          <SliderThumb class="reka-slider-thumb" />
+        </SliderRoot>
+        <span class="value-display">{{ fftRate.toFixed(0) }} fps</span>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="switch-row">
+        <label>FFT Max-Hold</label>
+        <SwitchRoot v-model="fftMaxHold" class="reka-switch-root" @update:model-value="onFFTMaxHoldChange">
+          <SwitchThumb class="reka-switch-thumb" />
+        </SwitchRoot>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -70,6 +136,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { SwitchRoot, SwitchThumb } from 'reka-ui'
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
+import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { useApi } from '../composables/useApi'
 
 const api = useApi()
@@ -79,6 +146,11 @@ const gainIndex = ref(0)
 const gains = ref<number[]>([])
 const ppm = ref(0)
 const spectrumAvg = ref(0.3)
+const agcPreset = ref('medium')
+const fftSizes = [1024, 2048, 4096, 8192, 16384]
+const fftSizeStr = ref('8192')
+const fftRate = ref(25)
+const fftMaxHold = ref(false)
 
 const gainSlider = computed({
   get: () => [gainIndex.value],
@@ -88,6 +160,11 @@ const gainSlider = computed({
 const avgSlider = computed({
   get: () => [spectrumAvg.value],
   set: (val: number[]) => { spectrumAvg.value = val[0] },
+})
+
+const fftRateSlider = computed({
+  get: () => [fftRate.value],
+  set: (val: number[]) => { fftRate.value = val[0] },
 })
 
 onMounted(async () => {
@@ -130,6 +207,38 @@ async function onAvgChange() {
     await api.setSpectrumAvg(spectrumAvg.value)
   } catch (e) {
     console.error('Set spectrum avg failed:', e)
+  }
+}
+
+async function onAGCPresetChange() {
+  try {
+    await api.setAGCPreset(agcPreset.value)
+  } catch (e) {
+    console.error('Set AGC preset failed:', e)
+  }
+}
+
+async function onFFTSizeChange() {
+  try {
+    await api.setFFTSize(parseInt(fftSizeStr.value))
+  } catch (e) {
+    console.error('Set FFT size failed:', e)
+  }
+}
+
+async function onFFTRateChange() {
+  try {
+    await api.setFFTRate(fftRate.value)
+  } catch (e) {
+    console.error('Set FFT rate failed:', e)
+  }
+}
+
+async function onFFTMaxHoldChange() {
+  try {
+    await api.setFFTMaxHold(fftMaxHold.value)
+  } catch (e) {
+    console.error('Set FFT max-hold failed:', e)
   }
 }
 </script>

@@ -17,7 +17,9 @@ func NewSSBDemod(quadRate float64) *SSBDemod {
 }
 
 // Type returns the demodulator type.
-func (d *SSBDemod) Type() DemodType { return DemodSSB }
+// SSBDemod is used for LSB, USB, CW-L, CW-U, and Raw I/Q modes.
+// The actual mode is tracked by the receiver; here we return DemodUSB as default.
+func (d *SSBDemod) Type() DemodType { return DemodUSB }
 
 // SetQuadRate updates the quadrature sample rate.
 func (d *SSBDemod) SetQuadRate(rate float64) { d.quadRate = rate }
