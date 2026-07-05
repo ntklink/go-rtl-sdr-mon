@@ -1,0 +1,125 @@
+/* Reka UI component styles (shared) */
+
+/* Select */
+.reka-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.reka-select-trigger:hover {
+  border-color: #0066cc;
+}
+
+.reka-select-trigger[data-state="open"] {
+  border-color: #0066cc;
+}
+
+.reka-select-trigger svg {
+  margin-left: 8px;
+  opacity: 0.6;
+}
+
+.reka-select-content {
+  min-width: var(--reka-select-trigger-width);
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 4px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.reka-select-item {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  outline: none;
+}
+
+.reka-select-item[data-highlighted] {
+  background: #0066cc;
+  color: #fff;
+}
+
+/* Slider */
+.reka-slider-root {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 20px;
+}
+
+.reka-slider-track {
+  flex: 1;
+  height: 4px;
+  background: #333;
+  border-radius: 2px;
+}
+
+.reka-slider-range {
+  height: 100%;
+  background: #00ff88;
+  border-radius: 2px;
+}
+
+.reka-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #00ff88;
+  border: 2px solid #0a0a0a;
+  cursor: pointer;
+  outline: none;
+  margin-left: -7px;
+}
+
+.reka-slider-thumb:focus-visible {
+  box-shadow: 0 0 0 2px #0066cc;
+}
+
+/* Switch */
+.reka-switch-root {
+  width: 36px;
+  height: 20px;
+  background: #333;
+  border-radius: 10px;
+  cursor: pointer;
+  outline: none;
+  border: none;
+  padding: 0;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.reka-switch-root[data-state="checked"] {
+  background: #0066cc;
+}
+
+.reka-switch-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translateX(2px);
+  transition: transform 0.15s;
+}
+
+.reka-switch-root[data-state="checked"] .reka-switch-thumb {
+  transform: translateX(18px);
+}
