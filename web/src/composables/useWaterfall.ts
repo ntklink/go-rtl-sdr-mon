@@ -12,25 +12,38 @@ export function useWaterfall() {
   let reconnectTimer: number | null = null
   let rafId: number | null = null
 
-  // Colormap: dark blue -> blue -> purple -> dark red -> orange (darker palette)
+  // Colormap: muted viridis-inspired (dark navy → teal → green → warm yellow)
   function getColor(db: number): [number, number, number] {
     // Map dB range [-100, 0] to [0, 1]
     const norm = Math.max(0, Math.min(1, (db + 100) / 100))
-    if (norm < 0.2) {
-      const t = norm / 0.2
-      return [0, 0, Math.floor(t * 80)]          // black -> dark blue
-    } else if (norm < 0.4) {
-      const t = (norm - 0.2) / 0.2
-      return [0, 0, Math.floor(80 + t * 100)]     // dark blue -> blue
-    } else if (norm < 0.6) {
-      const t = (norm - 0.4) / 0.2
-      return [Math.floor(t * 100), 0, Math.floor(180 - t * 80)]  // blue -> purple
-    } else if (norm < 0.8) {
-      const t = (norm - 0.6) / 0.2
-      return [Math.floor(100 + t * 80), Math.floor(t * 40), Math.floor(100 - t * 60)]  // purple -> dark red
+    if (norm < 0.25) {
+      const t = norm / 0.25
+      return [
+        Math.floor(t * 15),
+        Math.floor(t * 25),
+        Math.floor(20 + t * 70),
+      ]                                    // black → dark navy
+    } else if (norm < 0.5) {
+      const t = (norm - 0.25) / 0.25
+      return [
+        Math.floor(15 + t * 25),
+        Math.floor(25 + t * 80),
+        Math.floor(90 + t * 30),
+      ]                                    // dark navy → steel blue/teal
+    } else if (norm < 0.75) {
+      const t = (norm - 0.5) / 0.25
+      return [
+        Math.floor(40 + t * 80),
+        Math.floor(105 + t * 75),
+        Math.floor(120 - t * 60),
+      ]                                    // teal → green
     } else {
-      const t = (norm - 0.8) / 0.2
-      return [Math.floor(180 + t * 60), Math.floor(40 + t * 80), 0]  // dark red -> orange
+      const t = (norm - 0.75) / 0.25
+      return [
+        Math.floor(120 + t * 100),
+        Math.floor(180 + t * 40),
+        Math.floor(60 - t * 40),
+      ]                                    // green → warm yellow
     }
   }
 

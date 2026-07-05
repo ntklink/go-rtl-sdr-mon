@@ -31,7 +31,13 @@
     <!-- Main area: Waterfall + tabbed side panels -->
     <div class="main-area">
       <div class="center-area">
-        <Waterfall :center-freq="status.CenterFreq" :sample-rate="status.SampleRate" />
+        <Waterfall
+          :center-freq="status.CenterFreq"
+          :sample-rate="status.SampleRate"
+          :filter-low="status.FilterLow"
+          :filter-high="status.FilterHigh"
+          @update:filter="setFilter"
+        />
       </div>
       <div class="side-panels">
         <TabsRoot default-value="receiver" class="reka-tabs-root side-tabs">

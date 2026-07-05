@@ -1,5 +1,5 @@
 <template>
-  <div class="waterfall-container">
+  <div class="waterfall-container" ref="containerRef">
     <!-- Frequency axis -->
     <div class="freq-axis" ref="freqAxis">
       <span
@@ -15,16 +15,20 @@
     <canvas ref="spectrumCanvas" class="spectrum" :width="canvasWidth" :height="spectrumHeight"></canvas>
     <!-- Waterfall canvas -->
     <canvas ref="waterfallCanvas" class="waterfall" :width="canvasWidth" :height="waterfallHeight"></canvas>
-    <!-- Filter overlay -->
+    <!-- Filter overlay (dimmed outside, highlighted inside, draggable edges) -->
     <div class="filter-overlay" :style="filterStyle">
-      <div class="filter-line left"></div>
-      <div class="filter-line right"></div>
+      <div class="filter-dim left"></div>
+      <div class="filter-dim right"></div>
+      <div class="filter-passband" @mousedown="onCenterDown">
+        <div class="filter-handle left" @mousedown.stop="onLeftDown"></div>
+        <div class="filter-handle right" @mousedown.stop="onRightDown"></div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { useWaterfall } from '../composables/useWaterfall'
 
 const props = defineProps<{
@@ -34,6 +38,11 @@ const props = defineProps<{
   filterHigh?: number
 }>()
 
+const emit = defineEmits<{
+  'update:filter': [low: number, high: number]
+}>()
+
+const containerRef = ref<HTMLDivElement | null>(null)
 const spectrumCanvas = ref<HTMLCanvasElement | null>(null)
 const waterfallCanvas = ref<HTMLCanvasElement | null>(null)
 const canvasWidth = ref(800)
@@ -41,6 +50,85 @@ const spectrumHeight = ref(200)
 const waterfallHeight = ref(300)
 
 const { setCanvases, fftSize } = useWaterfall()
+
+// --- Filter drag logic ---
+type DragMode = 'none' | 'left' | 'right' | 'center'
+let dragMode: DragMode = 'none'
+let dragStartX = 0
+let dragStartLow = 0
+let dragStartHigh = 0
+
+function pxToFreq(px: number): number {
+  const w = canvasWidth.value
+  if (w <= 0) return 0
+  return (px / w) * props.sampleRate - props.sampleRate / 2
+}
+
+function freqToPercent(freq: number): number {
+  const halfBW = props.sampleRate / 2
+  return ((freq + halfBW) / props.sampleRate) * 100
+}
+
+function onLeftDown(e: MouseEvent) {
+  e.preventDefault()
+  dragMode = 'left'
+  dragStartX = e.clientX
+  dragStartLow = props.filterLow || 0
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+function onRightDown(e: MouseEvent) {
+  e.preventDefault()
+  dragMode = 'right'
+  dragStartX = e.clientX
+  dragStartHigh = props.filterHigh || 0
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+function onCenterDown(e: MouseEvent) {
+  e.preventDefault()
+  dragMode = 'center'
+  dragStartX = e.clientX
+  dragStartLow = props.filterLow || 0
+  dragStartHigh = props.filterHigh || 0
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
+function onMouseMove(e: MouseEvent) {
+  const dx = e.clientX - dragStartX
+  const df = (dx / canvasWidth.value) * props.sampleRate
+
+  if (dragMode === 'left') {
+    const newLow = Math.min(dragStartLow + df, (props.filterHigh || 0) - 100)
+    emit('update:filter', Math.round(newLow), props.filterHigh || 0)
+  } else if (dragMode === 'right') {
+    const newHigh = Math.max(dragStartHigh + df, (props.filterLow || 0) + 100)
+    emit('update:filter', props.filterLow || 0, Math.round(newHigh))
+  } else if (dragMode === 'center') {
+    const bw = dragStartHigh - dragStartLow
+    const newLow = dragStartLow + df
+    const newHigh = dragStartHigh + df
+    const halfBW = props.sampleRate / 2
+    // Clamp to passband
+    if (newLow > -halfBW && newHigh < halfBW) {
+      emit('update:filter', Math.round(newLow), Math.round(newHigh))
+    }
+  }
+}
+
+function onMouseUp() {
+  dragMode = 'none'
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+}
+
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup', onMouseUp)
+})
 
 const freqTicks = computed(() => {
   const ticks: { freq: number; pos: number; label: string }[] = []
@@ -64,13 +152,14 @@ const freqTicks = computed(() => {
 })
 
 const filterStyle = computed(() => {
-  if (!props.filterLow || !props.filterHigh) return { display: 'none' }
+  const low = props.filterLow ?? 0
+  const high = props.filterHigh ?? 0
   const halfBW = props.sampleRate / 2
-  const leftFrac = (props.filterLow + halfBW) / props.sampleRate
-  const rightFrac = (props.filterHigh + halfBW) / props.sampleRate
+  const leftPct = freqToPercent(low)
+  const rightPct = freqToPercent(high)
   return {
-    left: (leftFrac * 100) + '%',
-    width: ((rightFrac - leftFrac) * 100) + '%',
+    '--left-pct': leftPct + '%',
+    '--right-pct': (100 - rightPct) + '%',
     display: 'block',
   }
 })
@@ -153,21 +242,69 @@ watch([canvasWidth, spectrumHeight, waterfallHeight], () => {
   position: absolute;
   top: 20px;
   bottom: 0;
-  background: rgba(255, 255, 0, 0.05);
-  border-left: 1px solid rgba(255, 255, 0, 0.5);
-  border-right: 1px solid rgba(255, 255, 0, 0.5);
+  left: 0;
+  right: 0;
   pointer-events: none;
   z-index: 10;
 }
 
-.filter-line {
+/* Dimmed regions outside the filter passband */
+.filter-dim {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1px;
-  background: rgba(255, 255, 0, 0.6);
+  background: rgba(0, 0, 0, 0.5);
 }
 
-.filter-line.left { left: 0; }
-.filter-line.right { right: 0; }
+.filter-dim.left {
+  left: 0;
+  width: var(--left-pct, 50%);
+  border-right: 1px solid rgba(100, 180, 255, 0.7);
+}
+
+.filter-dim.right {
+  right: 0;
+  width: var(--right-pct, 50%);
+  border-left: 1px solid rgba(100, 180, 255, 0.7);
+}
+
+/* Passband region (draggable center) */
+.filter-passband {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--left-pct, 50%);
+  right: var(--right-pct, 50%);
+  background: rgba(100, 180, 255, 0.06);
+  border-left: 1px solid rgba(100, 180, 255, 0.7);
+  border-right: 1px solid rgba(100, 180, 255, 0.7);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.filter-passband:active {
+  cursor: grabbing;
+}
+
+/* Drag handles on left and right edges */
+.filter-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+
+.filter-handle.left {
+  left: -4px;
+}
+
+.filter-handle.right {
+  right: -4px;
+}
+
+.filter-handle:hover {
+  background: rgba(100, 180, 255, 0.2);
+}
 </style>
