@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ntklink/go-rtl-sdr-mon/internal/adsb"
 	"github.com/ntklink/go-rtl-sdr-mon/internal/demod"
 )
 
@@ -25,6 +26,7 @@ const (
 	DemodWFM       = demod.DemodWFM       // 9
 	DemodWFMStereo = demod.DemodWFMStereo // 10
 	DemodWFMOirt   = demod.DemodWFMOirt   // 11
+	DemodADSB      = demod.DemodADSB      // 12 - ADS-B
 )
 
 // AudioRate is the standard audio output sample rate.
@@ -62,6 +64,7 @@ var filterPresetTable = map[DemodType][3][2]float64{
 	DemodWFM:       {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
 	DemodWFMStereo: {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
 	DemodWFMOirt:   {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
+	DemodADSB:      {{-1000000, 1000000}, {-1000000, 1000000}, {-1000000, 1000000}},
 }
 
 // ReceiverConfig holds configuration for the receiver.
@@ -128,6 +131,13 @@ type Receiver struct {
 	audioResampler  *Resampler
 	audioResamplerR *Resampler
 
+	// ADS-B
+	adsbDecoder  *adsb.Decoder
+	adsbTracker  *adsb.Tracker
+	aircraftSubs map[chan []adsb.Aircraft]struct{}
+	rxLat        float64
+	rxLon        float64
+
 	// Output subscribers (per-client channels)
 	audioSubs map[chan AudioBlock]struct{}
 	fftSubs   map[chan []float32]struct{}
@@ -174,6 +184,10 @@ type Status struct {
 	FreqCorrection int     // ppm
 	AGCOn          bool    // AGC enabled
 	AGCPreset      string  // AGC preset name
+
+	// Receiver position (for ADS-B CPR decoding)
+	RxLat float64
+	RxLon float64
 }
 
 // NewReceiver creates a new receiver with the given source and config.
@@ -193,6 +207,7 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 		audioSubs:    make(map[chan AudioBlock]struct{}),
 		fftSubs:      make(map[chan []float32]struct{}),
 		statSubs:     make(map[chan Status]struct{}),
+		aircraftSubs: make(map[chan []adsb.Aircraft]struct{}),
 		stopCh:       make(chan struct{}),
 		fftRate:      25.0, // 25 fps (gqrx default)
 	}
@@ -205,6 +220,10 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	// Set up AGC with medium preset (gqrx default)
 	r.agc.SetPreset(AGCPresetMedium)
 	r.config.AGCOn = true
+
+	// Set up ADS-B decoder and tracker
+	r.adsbDecoder = adsb.NewDecoder(float64(config.SampleRate))
+	r.adsbTracker = adsb.NewTracker()
 
 	// Set up demodulator (this will set the correct DDC frequency for the mode)
 	r.setDemodulator(config.Demod)
@@ -266,6 +285,32 @@ func (r *Receiver) UnsubscribeStatus(ch chan Status) {
 	close(ch)
 }
 
+// SubscribeAircraft creates a per-client aircraft data channel.
+func (r *Receiver) SubscribeAircraft() chan []adsb.Aircraft {
+	ch := make(chan []adsb.Aircraft, 1)
+	r.subMu.Lock()
+	r.aircraftSubs[ch] = struct{}{}
+	r.subMu.Unlock()
+	return ch
+}
+
+// UnsubscribeAircraft removes a subscriber and closes its channel.
+func (r *Receiver) UnsubscribeAircraft(ch chan []adsb.Aircraft) {
+	r.subMu.Lock()
+	delete(r.aircraftSubs, ch)
+	r.subMu.Unlock()
+	close(ch)
+}
+
+// SetReceiverPosition sets the receiver position for ADS-B CPR decoding.
+func (r *Receiver) SetReceiverPosition(lat, lon float64) {
+	r.mu.Lock()
+	r.rxLat = lat
+	r.rxLon = lon
+	r.mu.Unlock()
+	r.adsbTracker.SetReceiverPosition(lat, lon)
+}
+
 // broadcastAudio sends an audio block to all subscribers (non-blocking).
 func (r *Receiver) broadcastAudio(block AudioBlock) {
 	r.subMu.Lock()
@@ -296,6 +341,18 @@ func (r *Receiver) broadcastStatus(status Status) {
 	for ch := range r.statSubs {
 		select {
 		case ch <- status:
+		default:
+		}
+	}
+	r.subMu.Unlock()
+}
+
+// broadcastAircraft sends aircraft data to all subscribers (non-blocking).
+func (r *Receiver) broadcastAircraft(aircraft []adsb.Aircraft) {
+	r.subMu.Lock()
+	for ch := range r.aircraftSubs {
+		select {
+		case ch <- aircraft:
 		default:
 		}
 	}
@@ -348,6 +405,16 @@ func (r *Receiver) processLoop() {
 			if statusTicker >= 10 {
 				statusTicker = 0
 				r.sendStatus()
+				// Also broadcast aircraft data if in ADS-B mode
+				r.mu.Lock()
+				if r.demodType == DemodADSB {
+					r.adsbTracker.Cleanup()
+					aircraft := r.adsbTracker.GetAircraft()
+					r.mu.Unlock()
+					r.broadcastAircraft(aircraft)
+				} else {
+					r.mu.Unlock()
+				}
 			}
 		}
 	}
@@ -377,9 +444,17 @@ func (r *Receiver) processBlock(samples []complex128) {
 	// 5. Squelch check
 	r.checkSquelch()
 
-	// 6. Demodulate
+	// 6. Process: ADS-B or audio demodulation
 	var audioBlock AudioBlock
-	if r.demod != nil {
+	var adsbAircraft []adsb.Aircraft
+
+	if r.demodType == DemodADSB {
+		// Feed raw samples to ADS-B decoder (no DDC needed, signal is at baseband)
+		msgs := r.adsbDecoder.Process(samples)
+		for _, msg := range msgs {
+			r.adsbTracker.ProcessMessage(msg)
+		}
+	} else if r.demod != nil {
 		left, right := r.demod.Process(filtered)
 
 		// 7. AGC
@@ -424,6 +499,7 @@ func (r *Receiver) processBlock(samples []complex128) {
 	if audioBlock.Left != nil {
 		r.broadcastAudio(audioBlock)
 	}
+	r.broadcastAircraft(adsbAircraft)
 }
 
 // measureSignalLevel computes the RMS signal level in dBFS.
@@ -538,6 +614,9 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 	case DemodRaw:
 		// Raw I/Q: pass through without demodulation
 		r.demod = demod.NewSSBDemod(quadRate) // real part = I channel
+	case DemodADSB:
+		// ADS-B: no audio demodulator, raw samples go to ADS-B decoder
+		r.demod = nil
 	case DemodOff:
 		r.demod = nil
 	}
@@ -562,6 +641,13 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 func (r *Receiver) sendStatus() {
 	status := r.GetStatus()
 	r.broadcastStatus(status)
+}
+
+// GetAircraft returns the current list of tracked aircraft.
+func (r *Receiver) GetAircraft() []adsb.Aircraft {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.adsbTracker.GetAircraft()
 }
 
 // --- Control methods ---
@@ -752,6 +838,8 @@ func (r *Receiver) GetStatus() Status {
 		FreqCorrection: r.config.FreqCorrection,
 		AGCOn:          r.config.AGCOn,
 		AGCPreset:      r.agc.GetPreset().String(),
+		RxLat:          r.rxLat,
+		RxLon:          r.rxLon,
 	}
 }
 

@@ -56,6 +56,28 @@ const messages: Record<string, Record<string, string>> = {
     // Device selector
     'device.select': '选择设备...',
     'device.refresh': '刷新设备列表',
+
+    // ADS-B
+    'adsb.tab': 'ADS-B',
+    'adsb.aircraft': '飞机',
+    'adsb.callsign': '航班号',
+    'adsb.icao': 'ICAO',
+    'adsb.altitude': '高度',
+    'adsb.speed': '速度',
+    'adsb.track': '航向',
+    'adsb.vRate': '升降率',
+    'adsb.position': '位置',
+    'adsb.count': '飞机数',
+    'adsb.rxPos': '接收机位置',
+    'adsb.lat': '纬度',
+    'adsb.lon': '经度',
+    'adsb.setRxPos': '设置',
+    'adsb.noData': '暂无飞机数据',
+    'adsb.geoLocate': '获取浏览器定位',
+    'adsb.geoUnsupported': '浏览器不支持定位功能',
+    'adsb.geoDenied': '定位权限被拒绝',
+    'adsb.geoUnavailable': '无法获取位置信息',
+    'adsb.geoTimeout': '定位超时',
   },
 
   'en': {
@@ -105,6 +127,28 @@ const messages: Record<string, Record<string, string>> = {
 
     'device.select': 'Select device...',
     'device.refresh': 'Refresh device list',
+
+    // ADS-B
+    'adsb.tab': 'ADS-B',
+    'adsb.aircraft': 'Aircraft',
+    'adsb.callsign': 'Callsign',
+    'adsb.icao': 'ICAO',
+    'adsb.altitude': 'Altitude',
+    'adsb.speed': 'Speed',
+    'adsb.track': 'Track',
+    'adsb.vRate': 'V/S',
+    'adsb.position': 'Position',
+    'adsb.count': 'Aircraft',
+    'adsb.rxPos': 'Receiver Position',
+    'adsb.lat': 'Latitude',
+    'adsb.lon': 'Longitude',
+    'adsb.setRxPos': 'Set',
+    'adsb.noData': 'No aircraft data',
+    'adsb.geoLocate': 'Get browser location',
+    'adsb.geoUnsupported': 'Geolocation not supported',
+    'adsb.geoDenied': 'Location permission denied',
+    'adsb.geoUnavailable': 'Position unavailable',
+    'adsb.geoTimeout': 'Location request timed out',
   },
 }
 

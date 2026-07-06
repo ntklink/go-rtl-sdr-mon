@@ -19,7 +19,7 @@ import (
 func demodOptions() []string {
 	return []string{
 		"OFF", "Raw I/Q", "AM", "AM-Sync", "LSB", "USB",
-		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT",
+		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT", "ADS-B",
 	}
 }
 
@@ -81,6 +81,9 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	api.GET("/ws/fft", s.handleWSFFT)
 	api.GET("/ws/audio", s.handleWSAudio)
 	api.GET("/ws/status", s.handleWSStatus)
+	api.GET("/ws/aircraft", s.handleWSAircraft)
+	api.POST("/receiver-position", s.handleSetReceiverPosition)
+	api.GET("/aircraft", s.handleGetAircraft)
 }
 
 // --- REST API Handlers ---
@@ -245,6 +248,8 @@ func (s *Server) handleSetDemod(c echo.Context) error {
 		dt = sdr.DemodWFMStereo
 	case "WFM-OIRT", "wfm-oirt", "WFMO":
 		dt = sdr.DemodWFMOirt
+	case "ADS-B", "adsb", "ads-b", "ADS":
+		dt = sdr.DemodADSB
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown demod type"})
 	}
@@ -708,4 +713,61 @@ func (s *Server) handleWSStatus(c echo.Context) error {
 			}
 		}
 	}
+}
+
+// handleWSAircraft streams ADS-B aircraft data over WebSocket.
+func (s *Server) handleWSAircraft(c echo.Context) error {
+	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+
+	aircraftCh := s.receiver.SubscribeAircraft()
+	defer s.receiver.UnsubscribeAircraft(aircraftCh)
+
+	// Reader for close detection
+	go func() {
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Send initial snapshot
+	aircraft := s.receiver.GetAircraft()
+	if err := ws.WriteJSON(aircraft); err != nil {
+		return nil
+	}
+
+	for {
+		aircraft, ok := <-aircraftCh
+		if !ok {
+			return nil
+		}
+		if err := ws.WriteJSON(aircraft); err != nil {
+			return nil
+		}
+	}
+}
+
+// handleGetAircraft returns the current list of tracked aircraft.
+func (s *Server) handleGetAircraft(c echo.Context) error {
+	aircraft := s.receiver.GetAircraft()
+	return c.JSON(http.StatusOK, map[string]any{"aircraft": aircraft})
+}
+
+type receiverPositionRequest struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+func (s *Server) handleSetReceiverPosition(c echo.Context) error {
+	var req receiverPositionRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	s.receiver.SetReceiverPosition(req.Latitude, req.Longitude)
+	return c.JSON(http.StatusOK, req)
 }

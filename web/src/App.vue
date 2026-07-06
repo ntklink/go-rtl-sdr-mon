@@ -32,19 +32,22 @@
     <div class="main-area">
       <div class="center-area">
         <Waterfall
+          v-if="!isADSB"
           :center-freq="status.CenterFreq"
           :sample-rate="status.SampleRate"
           :filter-low="status.FilterLow"
           :filter-high="status.FilterHigh"
           @update:filter="setFilter"
         />
+        <AircraftMap v-else />
       </div>
       <div class="side-panels">
-        <TabsRoot default-value="receiver" class="reka-tabs-root side-tabs">
+        <TabsRoot v-model="activeTab" default-value="receiver" class="reka-tabs-root side-tabs">
           <TabsList class="reka-tabs-list">
             <TabsTrigger value="receiver" class="reka-tabs-trigger">{{ t('tab.receiver') }}</TabsTrigger>
             <TabsTrigger value="gain" class="reka-tabs-trigger">{{ t('tab.gain') }}</TabsTrigger>
             <TabsTrigger value="audio" class="reka-tabs-trigger">{{ t('tab.audio') }}</TabsTrigger>
+            <TabsTrigger value="adsb" class="reka-tabs-trigger">{{ t('adsb.tab') }}</TabsTrigger>
           </TabsList>
           <TabsContent value="receiver" force-mount class="reka-tabs-content">
             <ReceiverPanel
@@ -61,6 +64,9 @@
           <TabsContent value="audio" force-mount class="reka-tabs-content">
             <AudioPlayer />
           </TabsContent>
+          <TabsContent value="adsb" force-mount class="reka-tabs-content">
+            <AircraftPanel />
+          </TabsContent>
         </TabsRoot>
       </div>
     </div>
@@ -68,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, computed, ref, watch } from 'vue'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
 import Waterfall from './components/Waterfall.vue'
 import FrequencyControl from './components/FrequencyControl.vue'
@@ -76,6 +82,8 @@ import DeviceSelector from './components/DeviceSelector.vue'
 import ReceiverPanel from './components/ReceiverPanel.vue'
 import GainPanel from './components/GainPanel.vue'
 import AudioPlayer from './components/AudioPlayer.vue'
+import AircraftMap from './components/AircraftMap.vue'
+import AircraftPanel from './components/AircraftPanel.vue'
 import { useApi } from './composables/useApi'
 import { useStatus } from './composables/useStatus'
 import { useI18n } from './composables/useI18n'
@@ -83,6 +91,13 @@ import { useI18n } from './composables/useI18n'
 const api = useApi()
 const { status } = useStatus()
 const { t, locale, setLocale } = useI18n()
+
+const isADSB = computed(() => status.value.Demod === 'ADS-B')
+
+const activeTab = ref('receiver')
+watch(isADSB, (adsb) => {
+  if (adsb) activeTab.value = 'adsb'
+})
 
 function toggleLocale() {
   setLocale(locale.value === 'zh-CN' ? 'en' : 'zh-CN')
@@ -99,6 +114,10 @@ async function setFrequency(freq: number) {
 async function setDemod(demod: string) {
   try {
     await api.setDemod(demod)
+    // Auto-tune to 1090 MHz when ADS-B is selected
+    if (demod === 'ADS-B' && status.value.CenterFreq !== 1090000000) {
+      await api.setFrequency(1090000000)
+    }
   } catch (e) {
     console.error('Set demod failed:', e)
   }

@@ -17,6 +17,7 @@ const (
 	DemodWFM                        // 9  - WFM (mono)
 	DemodWFMStereo                  // 10 - WFM (stereo)
 	DemodWFMOirt                    // 11 - WFM (oirt stereo)
+	DemodADSB                       // 12 - ADS-B (1090 MHz)
 )
 
 // String returns the name of the demodulator type.
@@ -46,6 +47,8 @@ func (d DemodType) String() string {
 		return "WFM-Stereo"
 	case DemodWFMOirt:
 		return "WFM-OIRT"
+	case DemodADSB:
+		return "ADS-B"
 	default:
 		return "Unknown"
 	}

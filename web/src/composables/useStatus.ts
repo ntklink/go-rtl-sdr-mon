@@ -23,6 +23,10 @@ export interface ReceiverStatus {
   FreqCorrection: number
   AGCOn: boolean
   AGCPreset: string
+
+  // Receiver position (for ADS-B CPR decoding)
+  RxLat: number
+  RxLon: number
 }
 
 // Singleton state (shared across all callers)
@@ -47,6 +51,8 @@ const status = ref<ReceiverStatus>({
   FreqCorrection: 0,
   AGCOn: true,
   AGCPreset: 'Medium',
+  RxLat: 0,
+  RxLon: 0,
 })
 
 let ws: WebSocket | null = null
