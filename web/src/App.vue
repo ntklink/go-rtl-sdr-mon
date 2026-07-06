@@ -101,6 +101,9 @@ const isADSB = computed(() => status.value.Demod === 'ADS-B')
 const isNOAA = computed(() => status.value.Demod === 'NOAA')
 
 const activeTab = ref('receiver')
+// Stores the frequency before entering ADS-B/NOAA mode, restored on exit
+let prevFrequency: number | null = null
+
 watch(isADSB, (adsb) => {
   if (adsb) activeTab.value = 'adsb'
 })
@@ -121,8 +124,18 @@ async function setFrequency(freq: number) {
 }
 
 async function setDemod(demod: string) {
+  const oldDemod = status.value.Demod
+  const wasSpecial = oldDemod === 'ADS-B' || oldDemod === 'NOAA'
+  const isSpecial = demod === 'ADS-B' || demod === 'NOAA'
+
   try {
+    // Save current frequency before entering ADS-B/NOAA from a normal mode
+    if (!wasSpecial && isSpecial) {
+      prevFrequency = status.value.CenterFreq
+    }
+
     await api.setDemod(demod)
+
     // Auto-tune to 1090 MHz when ADS-B is selected
     if (demod === 'ADS-B' && status.value.CenterFreq !== 1090000000) {
       await api.setFrequency(1090000000)
@@ -130,6 +143,12 @@ async function setDemod(demod: string) {
     // Auto-tune to NOAA-19 (137.1 MHz) when NOAA is selected
     if (demod === 'NOAA' && (status.value.CenterFreq < 137000000 || status.value.CenterFreq > 138000000)) {
       await api.setFrequency(137100000)
+    }
+
+    // Restore previous frequency when leaving ADS-B/NOAA back to a normal mode
+    if (wasSpecial && !isSpecial && prevFrequency !== null) {
+      await api.setFrequency(prevFrequency)
+      prevFrequency = null
     }
   } catch (e) {
     console.error('Set demod failed:', e)
