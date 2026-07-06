@@ -10,14 +10,14 @@
           v-model.number="rxLat"
           class="input rx-input"
           :placeholder="t('adsb.lat')"
-          step="0.0001"
+          step="0.00001"
         />
         <input
           type="number"
           v-model.number="rxLon"
           class="input rx-input"
           :placeholder="t('adsb.lon')"
-          step="0.0001"
+          step="0.00001"
         />
         <button class="btn-geo" @click="requestGeolocation" :disabled="geoLoading" :title="t('adsb.geoLocate')">
           {{ geoLoading ? '…' : '📍' }}
@@ -114,8 +114,8 @@ function requestGeolocation() {
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
       geoLoading.value = false
-      rxLat.value = parseFloat(pos.coords.latitude.toFixed(6))
-      rxLon.value = parseFloat(pos.coords.longitude.toFixed(6))
+      rxLat.value = parseFloat(pos.coords.latitude.toFixed(5))
+      rxLon.value = parseFloat(pos.coords.longitude.toFixed(5))
       try {
         await api.setReceiverPosition(rxLat.value, rxLon.value)
       } catch (e) {

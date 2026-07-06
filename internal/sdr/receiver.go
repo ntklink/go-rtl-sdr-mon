@@ -446,7 +446,6 @@ func (r *Receiver) processBlock(samples []complex128) {
 
 	// 6. Process: ADS-B or audio demodulation
 	var audioBlock AudioBlock
-	var adsbAircraft []adsb.Aircraft
 
 	if r.demodType == DemodADSB {
 		// Feed raw samples to ADS-B decoder (no DDC needed, signal is at baseband)
@@ -499,7 +498,6 @@ func (r *Receiver) processBlock(samples []complex128) {
 	if audioBlock.Left != nil {
 		r.broadcastAudio(audioBlock)
 	}
-	r.broadcastAircraft(adsbAircraft)
 }
 
 // measureSignalLevel computes the RMS signal level in dBFS.

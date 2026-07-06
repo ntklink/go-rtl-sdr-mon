@@ -3,56 +3,72 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAircraft, type Aircraft } from '../composables/useAircraft'
-import { useI18n } from '../composables/useI18n'
+import { useStatus } from '../composables/useStatus'
 
 const { aircraft } = useAircraft()
-const { t, locale } = useI18n()
+const { status } = useStatus()
 
 const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let tileLayer: L.TileLayer | null = null
 const markers: Map<string, L.Marker> = new Map()
 
-function createTileLayer(lc: string): L.TileLayer {
-  if (lc === 'zh-CN') {
-    return L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
-      subdomains: ['1', '2', '3', '4'],
-      attribution: '© AutoNavi',
-      maxZoom: 18,
-    })
-  }
-  return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap',
+// Default: Pacific Ocean, world view (no receiver position yet)
+const DEFAULT_CENTER: L.LatLngExpression = [0, 160]
+const DEFAULT_ZOOM = 2
+
+function createTileLayer(): L.TileLayer {
+  return L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
+    subdomains: ['a', 'b', 'c', 'd'],
+    attribution: '© OpenStreetMap contributors © CARTO',
     maxZoom: 18,
+    keepBuffer: 4,
+    errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
   })
 }
+
+// Computed receiver position from status — changes when backend updates
+const rxPos = computed(() => ({
+  lat: status.value.RxLat,
+  lon: status.value.RxLon,
+}))
+
+let lastRxLat = 0
+let lastRxLon = 0
 
 function initMap() {
   if (!mapContainer.value || map) return
 
+  // Start at receiver position if already known, otherwise Pacific Ocean world view
+  const hasPos = rxPos.value.lat !== 0 && rxPos.value.lon !== 0
+  const center = hasPos ? [rxPos.value.lat, rxPos.value.lon] as L.LatLngExpression : DEFAULT_CENTER
+  const zoom = hasPos ? 8 : DEFAULT_ZOOM
+  lastRxLat = rxPos.value.lat
+  lastRxLon = rxPos.value.lon
+
   map = L.map(mapContainer.value, {
-    center: [39.9, 116.4],
-    zoom: 7,
+    center,
+    zoom,
     zoomControl: true,
   })
 
-  tileLayer = createTileLayer(locale.value)
+  tileLayer = createTileLayer()
   tileLayer.addTo(map)
 }
 
-// Switch tile layer when locale changes
-watch(locale, (lc) => {
+// Re-center map when receiver position changes
+watch(rxPos, (pos) => {
   if (!map) return
-  if (tileLayer) {
-    map.removeLayer(tileLayer)
-  }
-  tileLayer = createTileLayer(lc)
-  tileLayer.addTo(map)
-})
+  if (pos.lat === 0 && pos.lon === 0) return
+  if (pos.lat === lastRxLat && pos.lon === lastRxLon) return
+  lastRxLat = pos.lat
+  lastRxLon = pos.lon
+  map.flyTo([pos.lat, pos.lon], 8, { duration: 1.0 })
+}, { deep: true })
 
 function formatAlt(alt: number): string {
   if (alt >= 1000) return (alt / 1000).toFixed(1) + 'km'
@@ -142,6 +158,32 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   background: #1a1a2e;
+}
+
+/* Dark theme for Leaflet UI elements */
+:deep(.leaflet-container) {
+  background: #1a1a2e;
+}
+
+/* Brighten the dark tiles */
+:deep(.leaflet-tile-pane) {
+  filter: brightness(1.55) saturate(1.2);
+}
+
+:deep(.leaflet-control-zoom a) {
+  background: #2a2a3e !important;
+  color: #ccc !important;
+  border-color: #444 !important;
+}
+:deep(.leaflet-control-zoom a:hover) {
+  background: #3a3a4e !important;
+}
+:deep(.leaflet-control-attribution) {
+  background: rgba(26, 26, 46, 0.8) !important;
+  color: #666 !important;
+}
+:deep(.leaflet-control-attribution a) {
+  color: #888 !important;
 }
 </style>
 
