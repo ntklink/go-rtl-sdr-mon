@@ -59,16 +59,16 @@ func OpenRTLSDR(index int, sampleRate, centerFreq uint32) (*RTLSDRSource, error)
 
 	// Configure defaults
 	if err := dev.SetSampleRate(sampleRate); err != nil {
-		dev.Close()
+		_ = dev.Close()
 		return nil, fmt.Errorf("set sample rate: %w", err)
 	}
 	if err := dev.SetCenterFreq(centerFreq); err != nil {
-		dev.Close()
+		_ = dev.Close()
 		return nil, fmt.Errorf("set center freq: %w", err)
 	}
 	// Auto gain by default
 	if err := dev.SetTunerGainMode(false); err != nil {
-		dev.Close()
+		_ = dev.Close()
 		return nil, fmt.Errorf("set gain mode: %w", err)
 	}
 	s.autoGain.Store(true)
@@ -151,14 +151,14 @@ func (s *RTLSDRSource) Stop() {
 	}
 	close(s.stopCh)
 	s.running = false
-	s.dev.CancelAsync()
+	_ = s.dev.CancelAsync()
 }
 
 // Close closes the device.
 func (s *RTLSDRSource) Close() {
 	s.Stop()
 	if s.dev != nil {
-		s.dev.Close()
+		_ = s.dev.Close()
 		s.dev = nil
 	}
 }
@@ -202,10 +202,7 @@ func (s *RTLSDRSource) SetAutoGain(auto bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.autoGain.Store(auto)
-	mode := false // auto
-	if !auto {
-		mode = true // manual
-	}
+	mode := !auto // false=auto gain, true=manual gain
 	if err := s.dev.SetTunerGainMode(mode); err != nil {
 		return err
 	}

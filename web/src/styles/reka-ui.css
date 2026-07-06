@@ -64,6 +64,15 @@
   color: #fff;
 }
 
+.reka-select-item[data-highlighted] .device-serial {
+  color: #cce0ff;
+}
+
+.device-option {
+  display: flex;
+  align-items: center;
+}
+
 /* Slider */
 .reka-slider-root {
   display: flex;

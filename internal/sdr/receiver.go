@@ -117,7 +117,6 @@ type Receiver struct {
 	cwOffset     float64 // CW/BFO offset in Hz
 
 	// Bandpass filter (applied after DDC, before demod)
-	bpFilter  *FIRFilter
 	bpComplex *FIRComplexFilter
 
 	// Squelch

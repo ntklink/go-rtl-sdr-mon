@@ -20,10 +20,6 @@ type DDC struct {
 
 	// Decimation counter
 	decimCounter int
-
-	// Filter buffer
-	filterBuf []complex128
-	filterIdx int
 }
 
 // NewDDC creates a new DDC.

@@ -13,7 +13,7 @@
             v-for="d in devices"
             :key="d.id"
             :value="d.id"
-            class="reka-select-item"
+            class="reka-select-item device-option"
           >
             <span class="device-label">
               <span class="device-name">{{ d.name || d.product || d.id }}</span>
@@ -106,10 +106,15 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .device-name {
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .device-badge {
@@ -126,8 +131,11 @@ onMounted(() => {
 
 .device-serial {
   font-size: 10px;
-  color: #666;
-  margin-left: 8px;
+  color: #999;
+  margin-left: 12px;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: 'Courier New', monospace;
 }
 
 .refresh-btn {

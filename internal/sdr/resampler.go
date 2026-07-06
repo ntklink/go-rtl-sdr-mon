@@ -17,7 +17,6 @@ type Resampler struct {
 	// Anti-aliasing filter (used when downsampling)
 	aaFilter *FIRFilter
 	aaBuf    []float64
-	aaIdx    int
 }
 
 // NewResampler creates a new resampler.
@@ -39,14 +38,6 @@ func NewResampler(inputRate, outputRate float64) *Resampler {
 	}
 
 	return r
-}
-
-// aaFilterSample applies the anti-aliasing filter to a single sample.
-func (r *Resampler) aaFilterSample(x float64) float64 {
-	if r.aaFilter == nil {
-		return x
-	}
-	return r.aaFilter.Filter(x)
 }
 
 // Process resamples a block of samples.
