@@ -94,7 +94,7 @@ body {
 }
 
 .side-panels {
-  width: 290px;
+  width: 350px;
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -45,5 +45,8 @@ export function useApi() {
     setFilterPreset: (preset: string) => postJSON('/filter-preset', { preset }),
     setReceiverPosition: (latitude: number, longitude: number) => postJSON('/receiver-position', { latitude, longitude }),
     getADSBStats: () => getJSON('/adsb-stats'),
+    getNOAASatellites: () => getJSON('/noaa/satellites'),
+    getAPTStats: () => getJSON('/apt-stats'),
+    resetAPT: () => postJSON('/apt-reset', {}),
   }
 }

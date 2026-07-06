@@ -7,6 +7,7 @@ import (
 
 	"github.com/ntklink/go-rtl-sdr-mon/internal/adsb"
 	"github.com/ntklink/go-rtl-sdr-mon/internal/demod"
+	"github.com/ntklink/go-rtl-sdr-mon/internal/noaa"
 )
 
 // DemodType re-exports the demod type from the demod package for convenience.
@@ -27,6 +28,7 @@ const (
 	DemodWFMStereo = demod.DemodWFMStereo // 10
 	DemodWFMOirt   = demod.DemodWFMOirt   // 11
 	DemodADSB      = demod.DemodADSB      // 12 - ADS-B
+	DemodNOAA      = demod.DemodNOAA      // 13 - NOAA APT
 )
 
 // AudioRate is the standard audio output sample rate.
@@ -65,6 +67,7 @@ var filterPresetTable = map[DemodType][3][2]float64{
 	DemodWFMStereo: {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
 	DemodWFMOirt:   {{-100000, 100000}, {-80000, 80000}, {-60000, 60000}},
 	DemodADSB:      {{-1000000, 1000000}, {-1000000, 1000000}, {-1000000, 1000000}},
+	DemodNOAA:      {{-30000, 30000}, {-20000, 20000}, {-15000, 15000}},
 }
 
 // ReceiverConfig holds configuration for the receiver.
@@ -137,6 +140,13 @@ type Receiver struct {
 	aircraftSubs map[chan []adsb.Aircraft]struct{}
 	rxLat        float64
 	rxLon        float64
+
+	// NOAA APT
+	aptDecoder *noaa.APTDecoder
+	aptSubs    map[chan noaa.APTLine]struct{}
+
+	// APT lines pending broadcast (collected inside lock, sent outside)
+	aptLinesPending []noaa.APTLine
 
 	// Previous sample rate (saved when switching to ADS-B, restored when switching away)
 	prevSampleRate uint32
@@ -211,6 +221,7 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 		fftSubs:      make(map[chan []float32]struct{}),
 		statSubs:     make(map[chan Status]struct{}),
 		aircraftSubs: make(map[chan []adsb.Aircraft]struct{}),
+		aptSubs:      make(map[chan noaa.APTLine]struct{}),
 		stopCh:       make(chan struct{}),
 		fftRate:      25.0, // 25 fps (gqrx default)
 	}
@@ -227,6 +238,9 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	// Set up ADS-B decoder and tracker
 	r.adsbDecoder = adsb.NewDecoder(float64(config.SampleRate))
 	r.adsbTracker = adsb.NewTracker()
+
+	// Set up NOAA APT decoder (audio rate = 48 kHz)
+	r.aptDecoder = noaa.NewAPTDecoder(float64(AudioRate))
 
 	// Set up demodulator (this will set the correct DDC frequency for the mode)
 	r.setDemodulator(config.Demod)
@@ -312,6 +326,35 @@ func (r *Receiver) SetReceiverPosition(lat, lon float64) {
 	r.rxLon = lon
 	r.mu.Unlock()
 	r.adsbTracker.SetReceiverPosition(lat, lon)
+}
+
+// SubscribeAPT creates a per-client APT image line channel.
+func (r *Receiver) SubscribeAPT() chan noaa.APTLine {
+	ch := make(chan noaa.APTLine, 64)
+	r.subMu.Lock()
+	r.aptSubs[ch] = struct{}{}
+	r.subMu.Unlock()
+	return ch
+}
+
+// UnsubscribeAPT removes a subscriber and closes its channel.
+func (r *Receiver) UnsubscribeAPT(ch chan noaa.APTLine) {
+	r.subMu.Lock()
+	delete(r.aptSubs, ch)
+	r.subMu.Unlock()
+	close(ch)
+}
+
+// broadcastAPTLine sends an APT line to all subscribers (non-blocking).
+func (r *Receiver) broadcastAPTLine(line noaa.APTLine) {
+	r.subMu.Lock()
+	for ch := range r.aptSubs {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+	r.subMu.Unlock()
 }
 
 // broadcastAudio sends an audio block to all subscribers (non-blocking).
@@ -472,6 +515,15 @@ func (r *Receiver) processBlock(samples []complex128) {
 			rightResampled = r.audioResamplerR.Process(right)
 		}
 
+		// Feed to APT decoder if in NOAA mode
+		if r.demodType == DemodNOAA && r.aptDecoder != nil {
+			aptLines := r.aptDecoder.Process(leftResampled)
+			// Queue APT lines for broadcast (outside lock)
+			for i := range aptLines {
+				r.aptLinesPending = append(r.aptLinesPending, aptLines[i])
+			}
+		}
+
 		// 9. Convert to float32
 		leftF32 := ConvertToFloat32(leftResampled)
 		var rightF32 []float32
@@ -500,6 +552,13 @@ func (r *Receiver) processBlock(samples []complex128) {
 	}
 	if audioBlock.Left != nil {
 		r.broadcastAudio(audioBlock)
+	}
+	// Broadcast APT lines if any
+	if len(r.aptLinesPending) > 0 {
+		for _, line := range r.aptLinesPending {
+			r.broadcastAPTLine(line)
+		}
+		r.aptLinesPending = r.aptLinesPending[:0]
 	}
 }
 
@@ -633,6 +692,9 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 	case DemodADSB:
 		// ADS-B: no audio demodulator, raw samples go to ADS-B decoder
 		r.demod = nil
+	case DemodNOAA:
+		// NOAA APT: FM demod with 17 kHz deviation, no de-emphasis
+		r.demod = demod.NewFMDemod(quadRate, 17000, 0)
 	case DemodOff:
 		r.demod = nil
 	}
@@ -754,6 +816,8 @@ func (r *Receiver) reconfigureSampleRate(newRate uint32) error {
 	r.audioResamplerR = NewResampler(quadRate, AudioRate)
 	// Recreate ADS-B decoder with new sample rate
 	r.adsbDecoder = adsb.NewDecoder(float64(newRate))
+	// Recreate APT decoder (audio rate unchanged but reset state)
+	r.aptDecoder = noaa.NewAPTDecoder(float64(AudioRate))
 	// Update bandpass filter for new quad rate
 	r.updateFilter()
 	return nil
@@ -766,6 +830,25 @@ func (r *Receiver) GetADSBStats() (detected, valid, accepted, aircraftCount int)
 	detected, valid, accepted = r.adsbDecoder.Stats()
 	aircraftCount = r.adsbTracker.Count()
 	return
+}
+
+// GetAPTStats returns NOAA APT decoder statistics.
+func (r *Receiver) GetAPTStats() (linesDecoded, syncFound int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.aptDecoder != nil {
+		return r.aptDecoder.Stats()
+	}
+	return 0, 0
+}
+
+// ResetAPT clears the APT decoder state and image buffer.
+func (r *Receiver) ResetAPT() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.aptDecoder != nil {
+		r.aptDecoder.Reset()
+	}
 }
 
 // SetDemod sets the demodulator type.

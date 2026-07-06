@@ -1,6 +1,6 @@
 # Go RTL-SDR Monitor
 
-A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment.
+A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment. Supports broadcast FM/AM/SSB/CW, ADS-B aircraft tracking, and NOAA weather satellite APT imagery decoding.
 
 ![Overview](docs/image-overview.jpg)
 
@@ -12,8 +12,9 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 - **Web UI** — Vue 3 + [Reka UI](https://github.com/unovue/reka-ui), embedded into the Go binary via `//go:embed`
 - **Real-time Spectrum & Waterfall** — Canvas-rendered, streamed over WebSocket with configurable FFT size, rate, averaging, and max-hold
 - **Browser Audio Playback** — Demodulated PCM audio streamed over WebSocket, played with the Web Audio API
-- **12 Demodulation Modes** — OFF, Raw I/Q, AM, AM-Sync, LSB, USB, CW-L, CW-U, NFM, WFM, WFM-Stereo, WFM-OIRT (matching gqrx)
+- **14 Demodulation Modes** — OFF, Raw I/Q, AM, AM-Sync, LSB, USB, CW-L, CW-U, NFM, WFM, WFM-Stereo, WFM-OIRT, ADS-B, NOAA APT (gqrx-compatible + satellite)
 - **ADS-B Reception** — Decode Mode S Extended Squitter (1090 MHz) messages: Manchester decoding, CRC verification with single-bit error correction, CPR (Compact Position Reporting) position decoding, aircraft tracking with callsign/altitude/speed/heading/vertical-rate extraction
+- **NOAA APT Weather Satellite** — Decode APT (Automatic Picture Transmission) imagery from NOAA polar-orbiting satellites (NOAA-15/18/19 at 137 MHz): 2.4 kHz subcarrier AM demodulation, sync frame detection, real-time image line-by-line rendering, satellite frequency quick-select, PNG export
 - **Live Aircraft Map** — Leaflet-based map showing nearby aircraft positions with locale-aware tile layers (OpenStreetMap / AutoNavi); auto-requests browser geolocation for receiver position
 - **Full DSP Chain** — DDC, FIR bandpass filtering, AGC with presets, anti-aliased audio resampling
 - **gqrx-compatible Parameters** — AGC presets (Off/Slow/Medium/Fast), filter presets (Wide/Normal/Narrow), filter shapes (Soft/Normal/Sharp), CW offset, WFM de-emphasis
@@ -26,6 +27,7 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canvas
                       └→ DDC → Bandpass Filter → Demod → AGC → Resampler → WebSocket → Web Audio API
                       └→ ADS-B Decoder → Aircraft Tracker → WebSocket → Leaflet Map
+                      └→ FM Demod → APT Decoder (2.4kHz AM subcarrier) → WebSocket → Canvas Image
 ```
 
 ### DSP Signal Chain
@@ -174,6 +176,9 @@ Open `https://localhost:8080` in your browser.
 | POST | `/api/fft-max-hold` | `{"enabled":true}` | Enable/disable max-hold |
 | POST | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR) |
 | GET | `/api/aircraft` | — | Current tracked aircraft list |
+| GET | `/api/noaa/satellites` | — | List of NOAA APT satellites |
+| GET | `/api/apt-stats` | — | APT decoder statistics |
+| POST | `/api/apt-reset` | `{}` | Clear APT image buffer |
 
 ### WebSocket
 
@@ -183,6 +188,7 @@ Open `https://localhost:8080` in your browser.
 | `/api/ws/audio` | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples | Audio PCM |
 | `/api/ws/status` | JSON | Receiver status updates (500 ms interval) |
 | `/api/ws/aircraft` | JSON: `Aircraft[]` | ADS-B aircraft positions (broadcast every 10 blocks) |
+| `/api/ws/apt` | Binary: `4-byte lineNum` + `2080-byte pixels` | NOAA APT image lines |
 
 ## Project Structure
 
@@ -213,14 +219,17 @@ Open `https://localhost:8080` in your browser.
 │   ├── cpr.go               # Compact Position Reporting decoding
 │   ├── crc.go               # Mode S 24-bit CRC + error correction
 │   └── tracker.go           # Multi-aircraft tracking
+├── noaa/
+│   ├── types.go             # Satellite info, APT line/image types, pixel geometry
+│   └── apt.go               # APT decoder: 2.4kHz subcarrier AM demod, sync detection, image assembly
 ├── web/                     # Vue 3 + Reka UI frontend
 │   ├── src/
 │   │   ├── App.vue          # Main layout (top bar + tabs + waterfall/map)
 │   │   ├── components/      # Waterfall, FrequencyControl, ReceiverPanel,
 │   │   │                    # GainPanel, AudioPlayer, DeviceSelector,
-│   │   │                    # AircraftMap, AircraftPanel
-│   │   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
-│   │   │                    # useI18n, useAircraft, useDebounce
+│   │   │                    # AircraftMap, AircraftPanel, NoAAPanel
+│   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
+│   │   │                    # useI18n, useAircraft, useDebounce, useNoAA
 │   │   └── styles/          # main.css, reka-ui.css
 │   └── dist/                # Build output (embedded via //go:embed)
 ├── bin/                     # Compiled binaries

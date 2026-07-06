@@ -48,6 +48,7 @@
             <TabsTrigger value="gain" class="reka-tabs-trigger">{{ t('tab.gain') }}</TabsTrigger>
             <TabsTrigger value="audio" class="reka-tabs-trigger">{{ t('tab.audio') }}</TabsTrigger>
             <TabsTrigger value="adsb" class="reka-tabs-trigger">{{ t('adsb.tab') }}</TabsTrigger>
+            <TabsTrigger value="noaa" class="reka-tabs-trigger">{{ t('noaa.tab') }}</TabsTrigger>
           </TabsList>
           <TabsContent value="receiver" force-mount class="reka-tabs-content">
             <ReceiverPanel
@@ -67,6 +68,9 @@
           <TabsContent value="adsb" force-mount class="reka-tabs-content">
             <AircraftPanel />
           </TabsContent>
+          <TabsContent value="noaa" force-mount class="reka-tabs-content">
+            <NoAAPanel />
+          </TabsContent>
         </TabsRoot>
       </div>
     </div>
@@ -84,6 +88,7 @@ import GainPanel from './components/GainPanel.vue'
 import AudioPlayer from './components/AudioPlayer.vue'
 import AircraftMap from './components/AircraftMap.vue'
 import AircraftPanel from './components/AircraftPanel.vue'
+import NoAAPanel from './components/NoAAPanel.vue'
 import { useApi } from './composables/useApi'
 import { useStatus } from './composables/useStatus'
 import { useI18n } from './composables/useI18n'
@@ -93,10 +98,14 @@ const { status } = useStatus()
 const { t, locale, setLocale } = useI18n()
 
 const isADSB = computed(() => status.value.Demod === 'ADS-B')
+const isNOAA = computed(() => status.value.Demod === 'NOAA')
 
 const activeTab = ref('receiver')
 watch(isADSB, (adsb) => {
   if (adsb) activeTab.value = 'adsb'
+})
+watch(isNOAA, (noaa) => {
+  if (noaa) activeTab.value = 'noaa'
 })
 
 function toggleLocale() {
@@ -117,6 +126,10 @@ async function setDemod(demod: string) {
     // Auto-tune to 1090 MHz when ADS-B is selected
     if (demod === 'ADS-B' && status.value.CenterFreq !== 1090000000) {
       await api.setFrequency(1090000000)
+    }
+    // Auto-tune to NOAA-19 (137.1 MHz) when NOAA is selected
+    if (demod === 'NOAA' && status.value.CenterFreq < 137000000 || status.value.CenterFreq > 138000000) {
+      await api.setFrequency(137100000)
     }
   } catch (e) {
     console.error('Set demod failed:', e)

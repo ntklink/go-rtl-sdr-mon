@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	"github.com/ntklink/go-rtl-sdr-mon/internal/noaa"
 	"github.com/ntklink/go-rtl-sdr-mon/internal/sdr"
 )
 
@@ -144,7 +145,7 @@ func fileExists(path string) bool {
 func demodOptions() []string {
 	return []string{
 		"OFF", "Raw I/Q", "AM", "AM-Sync", "LSB", "USB",
-		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT", "ADS-B",
+		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT", "ADS-B", "NOAA",
 	}
 }
 
@@ -210,6 +211,12 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	api.POST("/receiver-position", s.handleSetReceiverPosition)
 	api.GET("/aircraft", s.handleGetAircraft)
 	api.GET("/adsb-stats", s.handleADSBStats)
+
+	// NOAA APT
+	api.GET("/ws/apt", s.handleWSAPT)
+	api.GET("/noaa/satellites", s.handleGetNOAASatellites)
+	api.GET("/apt-stats", s.handleAPTStats)
+	api.POST("/apt-reset", s.handleResetAPT)
 }
 
 // --- REST API Handlers ---
@@ -376,6 +383,8 @@ func (s *Server) handleSetDemod(c echo.Context) error {
 		dt = sdr.DemodWFMOirt
 	case "ADS-B", "adsb", "ads-b", "ADS":
 		dt = sdr.DemodADSB
+	case "NOAA", "noaa", "apt":
+		dt = sdr.DemodNOAA
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown demod type"})
 	}
@@ -907,4 +916,67 @@ func (s *Server) handleADSBStats(c echo.Context) error {
 		"accepted": accepted,
 		"aircraft": aircraftCount,
 	})
+}
+
+// handleGetNOAASatellites returns the list of NOAA satellites transmitting APT.
+func (s *Server) handleGetNOAASatellites(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]any{"satellites": noaa.Satellites()})
+}
+
+// handleAPTStats returns APT decoder statistics.
+func (s *Server) handleAPTStats(c echo.Context) error {
+	lines, sync := s.receiver.GetAPTStats()
+	return c.JSON(http.StatusOK, map[string]int{
+		"lines": lines,
+		"sync":  sync,
+	})
+}
+
+// handleResetAPT clears the APT decoder state and image buffer.
+func (s *Server) handleResetAPT(c echo.Context) error {
+	s.receiver.ResetAPT()
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleWSAPT streams APT image lines over WebSocket.
+// Binary protocol: [4 bytes lineNum (uint32 LE)] [2080 bytes pixel data (uint8)]
+func (s *Server) handleWSAPT(c echo.Context) error {
+	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+
+	aptCh := s.receiver.SubscribeAPT()
+	defer s.receiver.UnsubscribeAPT(aptCh)
+
+	// Reader for close detection
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		line, ok := <-aptCh
+		if !ok {
+			return nil
+		}
+		// 4 bytes line number + 2080 bytes pixel data
+		buf := make([]byte, 4+len(line.Pixels))
+		binary.LittleEndian.PutUint32(buf[0:4], uint32(line.LineNum))
+		copy(buf[4:], line.Pixels)
+		if err := ws.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+			return nil
+		}
+	}
 }

@@ -82,6 +82,17 @@ const messages: Record<string, Record<string, string>> = {
     'adsb.valid': '有效',
     'adsb.accepted': '采纳',
     'adsb.tip': '提示：确保采样率为 2 MHz，频率为 1090 MHz，增益调高或开启自动增益。需要 1090 MHz 天线。',
+
+    // NOAA
+    'noaa.tab': 'NOAA',
+    'noaa.title': 'NOAA 气象卫星',
+    'noaa.satellite': '卫星',
+    'noaa.lines': '行数',
+    'noaa.sync': '同步',
+    'noaa.reset': '清除图像',
+    'noaa.save': '保存图像',
+    'noaa.noImage': '暂无图像数据',
+    'noaa.tip': '提示：选择卫星频率，确保增益调高或开启自动增益。需要 137 MHz 天线。卫星过境时间约 15 分钟。',
   },
 
   'en': {
@@ -157,6 +168,17 @@ const messages: Record<string, Record<string, string>> = {
     'adsb.valid': 'Valid',
     'adsb.accepted': 'Accepted',
     'adsb.tip': 'Tip: Ensure sample rate is 2 MHz, frequency is 1090 MHz, gain is high or auto. A 1090 MHz antenna is required.',
+
+    // NOAA
+    'noaa.tab': 'NOAA',
+    'noaa.title': 'NOAA Weather Sat',
+    'noaa.satellite': 'Satellite',
+    'noaa.lines': 'Lines',
+    'noaa.sync': 'Sync',
+    'noaa.reset': 'Clear Image',
+    'noaa.save': 'Save Image',
+    'noaa.noImage': 'No image data',
+    'noaa.tip': 'Tip: Select a satellite frequency, ensure gain is high or auto. A 137 MHz antenna is required. Pass duration ~15 min.',
   },
 }
 
