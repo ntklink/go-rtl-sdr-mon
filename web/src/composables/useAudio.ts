@@ -14,7 +14,7 @@ export function useAudio() {
 
   // Buffer queue for smooth playback
   let nextPlayTime = 0
-  const BUFFER_THRESHOLD = 0.05 // 50ms minimum buffer before playing
+  const BUFFER_THRESHOLD = 0.2 // 200ms pre-buffer to absorb network jitter
 
   function initAudio() {
     if (audioCtx) return
@@ -71,7 +71,14 @@ export function useAudio() {
       source.connect(gainNode)
 
       const now = audioCtx.currentTime
+      // Reset on underrun: if the scheduled position fell behind, jump forward
       if (nextPlayTime < now + BUFFER_THRESHOLD) {
+        nextPlayTime = now + BUFFER_THRESHOLD
+      }
+      // Cap maximum buffer: if too far ahead (burst of blocks), reset to avoid
+      // growing latency
+      const MAX_BUFFER = 1.0 // 1 second
+      if (nextPlayTime > now + MAX_BUFFER) {
         nextPlayTime = now + BUFFER_THRESHOLD
       }
 

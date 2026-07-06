@@ -258,8 +258,10 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 }
 
 // SubscribeAudio creates a per-client audio channel.
+// Buffer of 16 blocks (~500ms at 48kHz) absorbs timing jitter so blocks
+// are not dropped when the WebSocket write is momentarily slow.
 func (r *Receiver) SubscribeAudio() chan AudioBlock {
-	ch := make(chan AudioBlock, 4)
+	ch := make(chan AudioBlock, 16)
 	r.subMu.Lock()
 	r.audioSubs[ch] = struct{}{}
 	r.subMu.Unlock()
