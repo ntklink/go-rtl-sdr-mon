@@ -1,10 +1,21 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
+	"log"
 	"math"
+	"math/big"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,6 +25,120 @@ import (
 )
 
 // --- Utility functions (migrated from console.go) ---
+
+// EnsureTLSCert checks for cert.pem and key.pem in the executable's directory.
+// If either is missing, a self-signed ECDSA certificate is generated automatically.
+// Returns the absolute paths to the certificate and key files.
+func EnsureTLSCert() (certFile, keyFile string, err error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", "", err
+	}
+	dir := filepath.Dir(exe)
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+
+	// Both files exist — nothing to do
+	if fileExists(certFile) && fileExists(keyFile) {
+		return certFile, keyFile, nil
+	}
+
+	log.Printf("Generating self-signed TLS certificate...")
+
+	// Generate ECDSA P-256 private key
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Collect IP addresses for SAN (localhost + all network interfaces)
+	var ipAddrs []net.IP
+	ipAddrs = append(ipAddrs, net.IPv4(127, 0, 0, 1), net.IPv6loopback)
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip != nil && !ip.IsUnspecified() {
+					ipAddrs = append(ipAddrs, ip)
+				}
+			}
+		}
+	}
+
+	// Build certificate template
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return "", "", err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName:   "go-rtl-sdr-mon",
+			Organization: []string{"go-rtl-sdr-mon"},
+		},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           ipAddrs,
+	}
+
+	// Self-sign the certificate
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Encode certificate to PEM
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return "", "", err
+	}
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		certOut.Close()
+		return "", "", err
+	}
+	certOut.Close()
+
+	// Encode private key to PEM
+	keyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return "", "", err
+	}
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", "", err
+	}
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}); err != nil {
+		keyOut.Close()
+		return "", "", err
+	}
+	keyOut.Close()
+
+	log.Printf("TLS certificate written to %s", certFile)
+	log.Printf("TLS private key written to %s", keyFile)
+
+	return certFile, keyFile, nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // demodOptions returns the list of available demodulator names (matches gqrx order).
 func demodOptions() []string {

@@ -27,6 +27,7 @@ func main() {
 	autoGain := flag.Bool("autogain", true, "Enable auto gain")
 	gain := flag.Int("gain", 248, "Manual gain in tenths of dB (248 = 24.8 dB, gqrx default)")
 	ppm := flag.Int("ppm", 0, "Frequency correction in ppm")
+	useTLS := flag.Bool("tls", true, "Use HTTPS (auto-generates self-signed cert if needed)")
 	flag.Parse()
 
 	// Create device manager with RTL-SDR enumerator
@@ -121,10 +122,6 @@ func main() {
 		Filesystem: http.FS(content),
 	}))
 
-	// Start HTTP server
-	addr := fmt.Sprintf(":%d", *port)
-	log.Printf("Web server starting on http://0.0.0.0%s", addr)
-
 	// Handle signals for clean shutdown
 	go func() {
 		sigCh := make(chan os.Signal, 1)
@@ -136,7 +133,21 @@ func main() {
 		e.Close()
 	}()
 
-	if err := e.Start(addr); err != nil {
-		log.Fatalf("Server error: %v", err)
+	// Start HTTP/HTTPS server
+	addr := fmt.Sprintf(":%d", *port)
+	if *useTLS {
+		certFile, keyFile, err := EnsureTLSCert()
+		if err != nil {
+			log.Fatalf("Failed to generate TLS certificate: %v", err)
+		}
+		log.Printf("Web server starting on https://0.0.0.0%s", addr)
+		if err := e.StartTLS(addr, certFile, keyFile); err != nil {
+			log.Fatalf("Server error: %v", err)
+		}
+	} else {
+		log.Printf("Web server starting on http://0.0.0.0%s", addr)
+		if err := e.Start(addr); err != nil {
+			log.Fatalf("Server error: %v", err)
+		}
 	}
 }
