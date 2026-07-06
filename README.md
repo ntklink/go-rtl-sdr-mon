@@ -77,10 +77,6 @@ cd web && npm install && npm run build    # Frontend → web/dist/
 go build -trimpath -ldflags="-s -w" -o bin/go-rtl-sdr-mon .
 ```
 
-### Cross-Compilation (Multi-Architecture)
-
-Cross-compilation uses Docker Buildx + QEMU to build for `linux/amd64`, `linux/arm64`, and `linux/arm` (armv7). Since the project uses CGO (librtlsdr), a C toolchain for each target architecture is required — Docker handles this automatically.
-
 **Prerequisites:**
 
 ```bash
@@ -102,19 +98,6 @@ make build-all      # All three architectures
 
 make dist           # Build all + package into tarballs in dist/
 ```
-
-### GitHub Releases
-
-Releases are automated via GitHub Actions (`.github/workflows/release.yml`). Push a tag to trigger a release:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The workflow builds all three architectures in parallel, creates `.tar.gz` archives with SHA256 checksums, and publishes a GitHub Release with auto-generated release notes.
-
-You can also trigger a release manually from the Actions tab (Workflow Dispatch) by specifying a tag name.
 
 ## Usage
 
