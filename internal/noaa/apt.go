@@ -223,15 +223,24 @@ func (d *APTDecoder) trySync() {
 
 	// Compute quality metric (normalized correlation)
 	var refNorm, winNorm float64
-	for i := 0; i < refLen; i++ {
-		refNorm += (d.syncRefA[i] - refMean) * (d.syncRefA[i] - refMean)
-	}
-	for i := 0; i < refLen; i++ {
-		dv := buf[bestPos+i] - refMean // approx window mean
-		winNorm += dv * dv
-	}
-	if refNorm > 0 && winNorm > 0 {
-		d.syncQuality = bestCorr / math.Sqrt(refNorm*winNorm)
+	if bestPos >= 0 {
+		for i := range refLen {
+			refNorm += (d.syncRefA[i] - refMean) * (d.syncRefA[i] - refMean)
+		}
+		var winMeanForNorm float64
+		for i := range refLen {
+			winMeanForNorm += buf[bestPos+i]
+		}
+		winMeanForNorm /= float64(refLen)
+		for i := range refLen {
+			dv := buf[bestPos+i] - winMeanForNorm
+			winNorm += dv * dv
+		}
+		if refNorm > 0 && winNorm > 0 {
+			d.syncQuality = bestCorr / math.Sqrt(refNorm*winNorm)
+		} else {
+			d.syncQuality = 0
+		}
 	} else {
 		d.syncQuality = 0
 	}

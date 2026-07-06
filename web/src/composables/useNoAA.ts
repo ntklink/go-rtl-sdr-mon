@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { useStatus } from './useStatus'
 
 export interface APTLine {
@@ -101,16 +101,14 @@ export function useNoAA() {
   }
 
   // Watch for demod changes
-  import('vue').then(({ watch }) => {
-    watch(() => status.value.Demod, (demod) => {
-      if (demod === 'NOAA') {
-        connectAPT()
-        startStatsPolling()
-      } else {
-        disconnectAPT()
-        stopStatsPolling()
-      }
-    })
+  const stopWatch = watch(() => status.value.Demod, (demod) => {
+    if (demod === 'NOAA') {
+      connectAPT()
+      startStatsPolling()
+    } else {
+      disconnectAPT()
+      stopStatsPolling()
+    }
   })
 
   function resetImage() {
@@ -161,6 +159,7 @@ export function useNoAA() {
       stopStatsPolling()
       refCount = 0
     }
+    stopWatch()
   })
 
   return {

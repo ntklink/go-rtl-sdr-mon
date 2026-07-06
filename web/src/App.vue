@@ -128,7 +128,7 @@ async function setDemod(demod: string) {
       await api.setFrequency(1090000000)
     }
     // Auto-tune to NOAA-19 (137.1 MHz) when NOAA is selected
-    if (demod === 'NOAA' && status.value.CenterFreq < 137000000 || status.value.CenterFreq > 138000000) {
+    if (demod === 'NOAA' && (status.value.CenterFreq < 137000000 || status.value.CenterFreq > 138000000)) {
       await api.setFrequency(137100000)
     }
   } catch (e) {
