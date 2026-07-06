@@ -153,16 +153,16 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { SwitchRoot, SwitchThumb } from 'reka-ui'
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
-import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
+import { SelectRoot, SelectTrigger, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
 import { useStatus } from '../composables/useStatus'
-import { useWaterfall } from '../composables/useWaterfall'
+import { spectrumBins } from '../composables/useWaterfall'
+import { debounce } from '../composables/useDebounce'
 
 const api = useApi()
 const { t } = useI18n()
 const { status, statusLoaded } = useStatus()
-const { spectrumBins } = useWaterfall()
 
 const autoGain = ref(true)
 const gainIndex = ref(0)
@@ -247,7 +247,7 @@ async function onAutoGainChange() {
   }
 }
 
-async function onGainChange() {
+const onGainChange = debounce(async () => {
   if (gains.value.length === 0) return
   const gain = gains.value[gainIndex.value]
   try {
@@ -255,21 +255,29 @@ async function onGainChange() {
   } catch (e) {
     console.error('Set gain failed:', e)
   }
-}
+}, 150)
+
+const onAvgChange = debounce(async () => {
+  try {
+    await api.setSpectrumAvg(spectrumAvg.value)
+  } catch (e) {
+    console.error('Set spectrum avg failed:', e)
+  }
+}, 150)
+
+const onFFTRateChange = debounce(async () => {
+  try {
+    await api.setFFTRate(fftRate.value)
+  } catch (e) {
+    console.error('Set FFT rate failed:', e)
+  }
+}, 150)
 
 async function onPpmChange() {
   try {
     await api.setFreqCorrection(ppm.value)
   } catch (e) {
     console.error('Set ppm failed:', e)
-  }
-}
-
-async function onAvgChange() {
-  try {
-    await api.setSpectrumAvg(spectrumAvg.value)
-  } catch (e) {
-    console.error('Set spectrum avg failed:', e)
   }
 }
 
@@ -291,14 +299,6 @@ async function onFFTSizeChange() {
 
 function onSpectrumBinsChange() {
   spectrumBins.value = parseInt(spectrumBinsStr.value)
-}
-
-async function onFFTRateChange() {
-  try {
-    await api.setFFTRate(fftRate.value)
-  } catch (e) {
-    console.error('Set FFT rate failed:', e)
-  }
 }
 
 async function onFFTMaxHoldChange() {

@@ -4,6 +4,10 @@ import { ref, onUnmounted } from 'vue'
 // Default 1024 to reduce bandwidth; 0 = full FFT data
 const spectrumBins = ref(1024)
 
+// Export spectrumBins directly so other components (e.g. GainPanel)
+// can access it without creating a redundant WebSocket connection.
+export { spectrumBins }
+
 export function useWaterfall() {
   const fftSize = ref(2048)
   const fftData = ref<Float32Array | null>(null)

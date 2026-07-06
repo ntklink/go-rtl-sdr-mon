@@ -182,7 +182,7 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	r := &Receiver{
 		source:       source,
 		spectrum:     NewSpectrumFFT(8192, 0.3),
-		ddc:          NewDDC(float64(config.SampleRate), config.FilterOffset-config.CWOffset, TargetQuadRate),
+		ddc:          NewDDC(float64(config.SampleRate), config.FilterOffset, TargetQuadRate),
 		agc:          NewAGC(TargetQuadRate),
 		config:       config,
 		squelchLevel: config.SquelchLevel,
@@ -207,7 +207,7 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	r.agc.SetPreset(AGCPresetMedium)
 	r.config.AGCOn = true
 
-	// Set up demodulator
+	// Set up demodulator (this will set the correct DDC frequency for the mode)
 	r.setDemodulator(config.Demod)
 
 	// Set up bandpass filter
@@ -357,14 +357,13 @@ func (r *Receiver) processLoop() {
 // processBlock processes a block of IQ samples through the DSP chain.
 func (r *Receiver) processBlock(samples []complex128) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
-	// 1. Compute spectrum (FFT) — rate limited
+	// 1. Compute spectrum (FFT) — rate limited, collect data for broadcast after unlock
+	var fftData []float32
 	now := time.Now()
 	if r.fftRate <= 0 || now.Sub(r.fftLastTime) >= time.Duration(float64(time.Second)/r.fftRate) {
-		fftData := r.spectrum.Compute(samples)
+		fftData = r.spectrum.Compute(samples)
 		r.fftLastTime = now
-		r.broadcastFFT(fftData)
 	}
 
 	// 2. DDC: frequency shift + decimation
@@ -380,6 +379,7 @@ func (r *Receiver) processBlock(samples []complex128) {
 	r.checkSquelch()
 
 	// 6. Demodulate
+	var audioBlock AudioBlock
 	if r.demod != nil {
 		left, right := r.demod.Process(filtered)
 
@@ -396,7 +396,7 @@ func (r *Receiver) processBlock(samples []complex128) {
 			rightResampled = r.audioResamplerR.Process(right)
 		}
 
-		// 9. Convert to float32 and send
+		// 9. Convert to float32
 		leftF32 := ConvertToFloat32(leftResampled)
 		var rightF32 []float32
 		if rightResampled != nil {
@@ -413,7 +413,16 @@ func (r *Receiver) processBlock(samples []complex128) {
 			}
 		}
 
-		audioBlock := AudioBlock{Left: leftF32, Right: rightF32}
+		audioBlock = AudioBlock{Left: leftF32, Right: rightF32}
+	}
+
+	r.mu.Unlock()
+
+	// Broadcast outside the lock to avoid blocking the DSP pipeline
+	if fftData != nil {
+		r.broadcastFFT(fftData)
+	}
+	if audioBlock.Left != nil {
 		r.broadcastAudio(audioBlock)
 	}
 }
@@ -507,6 +516,9 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 	r.demodType = dt
 	quadRate := r.ddc.QuadRate()
 
+	// Determine if this is a CW mode — CW offset only applies to CW modes.
+	isCW := dt == DemodCWL || dt == DemodCWU
+
 	switch dt {
 	case DemodNFM:
 		r.demod = demod.NewFMDemod(quadRate, 5000, 75e-6)
@@ -529,6 +541,13 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 		r.demod = demod.NewSSBDemod(quadRate) // real part = I channel
 	case DemodOff:
 		r.demod = nil
+	}
+
+	// Update DDC center frequency: CW offset only applies to CW modes.
+	if isCW {
+		r.ddc.SetCenterFreq(r.filterOffset - r.cwOffset)
+	} else {
+		r.ddc.SetCenterFreq(r.filterOffset)
 	}
 
 	// Apply NORMAL filter preset for this mode (gqrx default behavior)
@@ -557,12 +576,12 @@ func (r *Receiver) SetCenterFreq(freq uint32) error {
 }
 
 // SetFilterOffset sets the filter offset (tuning within passband).
-// The DDC center frequency is filterOffset - cwOffset (matching gqrx).
+// The DDC center frequency is filterOffset - cwOffset only in CW modes (matching gqrx).
 func (r *Receiver) SetFilterOffset(offset float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.filterOffset = offset
-	r.ddc.SetCenterFreq(offset - r.cwOffset)
+	r.updateDDCFreq()
 }
 
 // SetCWOffset sets the CW/BFO offset in Hz (gqrx default: 700).
@@ -571,7 +590,18 @@ func (r *Receiver) SetCWOffset(offset float64) {
 	defer r.mu.Unlock()
 	r.cwOffset = offset
 	r.config.CWOffset = offset
-	r.ddc.SetCenterFreq(r.filterOffset - offset)
+	r.updateDDCFreq()
+}
+
+// updateDDCFreq updates the DDC center frequency based on current mode.
+// CW offset only applies to CW-L/CW-U modes (matching gqrx behavior).
+func (r *Receiver) updateDDCFreq() {
+	isCW := r.demodType == DemodCWL || r.demodType == DemodCWU
+	if isCW {
+		r.ddc.SetCenterFreq(r.filterOffset - r.cwOffset)
+	} else {
+		r.ddc.SetCenterFreq(r.filterOffset)
+	}
 }
 
 // SetFilterShape sets the filter shape (SOFT/NORMAL/SHARP).

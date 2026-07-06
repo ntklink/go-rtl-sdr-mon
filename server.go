@@ -613,10 +613,17 @@ func (s *Server) handleWSAudio(c echo.Context) error {
 	audioCh := s.receiver.SubscribeAudio()
 	defer s.receiver.UnsubscribeAudio(audioCh)
 	var writeMu sync.Mutex
+	done := make(chan struct{})
+	defer close(done)
 
 	// Reader for close detection
 	go func() {
 		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
 			if _, _, err := ws.ReadMessage(); err != nil {
 				return
 			}
@@ -681,7 +688,7 @@ func (s *Server) handleWSStatus(c echo.Context) error {
 	statusCh := s.receiver.SubscribeStatus()
 	defer s.receiver.UnsubscribeStatus(statusCh)
 
-	// Also send periodic updates
+	// Send periodic full status for responsive UI and keepalive
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 

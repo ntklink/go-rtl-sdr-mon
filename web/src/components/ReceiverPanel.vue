@@ -95,11 +95,12 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
+import { SelectRoot, SelectTrigger, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { SliderRoot, SliderTrack, SliderRange, SliderThumb } from 'reka-ui'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
 import { useStatus } from '../composables/useStatus'
+import { debounce } from '../composables/useDebounce'
 
 const api = useApi()
 const { t } = useI18n()
@@ -122,8 +123,11 @@ const filterShape = ref('normal')
 
 // Local ref for demod, synced with prop
 const selectedDemod = ref(props.demod)
-watch(() => props.demod, (val) => { selectedDemod.value = val })
-watch(selectedDemod, (val) => { emit('update:demod', val) })
+watch(() => props.demod, (val) => { if (val) selectedDemod.value = val })
+watch(selectedDemod, (val) => {
+  if (!val || val === props.demod) return
+  emit('update:demod', val)
+})
 
 // One-time sync from backend status (on page load / reconnect)
 let synced = false
@@ -170,13 +174,13 @@ async function onFilterShapeChange() {
   }
 }
 
-async function onSquelchChange() {
+const onSquelchChange = debounce(async () => {
   try {
     await api.setSquelch(squelchLevel.value)
   } catch (e) {
     console.error('Set squelch failed:', e)
   }
-}
+}, 150)
 </script>
 
 <style scoped>

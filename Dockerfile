@@ -1,4 +1,5 @@
 # Stage 1: Build Vue frontend (on build host platform — Node.js/V8 crashes under QEMU)
+ARG BUILDPLATFORM=linux/amd64
 FROM --platform=$BUILDPLATFORM node:22-slim AS frontend
 WORKDIR /web
 COPY web/package*.json ./

@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 
 export interface ReceiverStatus {
   CenterFreq: number
@@ -51,7 +51,7 @@ const status = ref<ReceiverStatus>({
 
 let ws: WebSocket | null = null
 let reconnectTimer: number | null = null
-let refCount = 0
+let connected = false
 
 // True once the first real status has been received from the backend
 export const statusLoaded = ref(false)
@@ -77,21 +77,11 @@ function connect() {
 }
 
 export function useStatus() {
-  // Connect on first caller
-  if (refCount === 0) {
+  // Connect on first caller (singleton WebSocket)
+  if (!connected) {
+    connected = true
     connect()
   }
-  refCount++
-
-  onUnmounted(() => {
-    refCount--
-    if (refCount <= 0) {
-      refCount = 0
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
-      ws = null
-    }
-  })
 
   return { status, statusLoaded }
 }
