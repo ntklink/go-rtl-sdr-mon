@@ -110,10 +110,10 @@ func EnsureTLSCert() (certFile, keyFile string, err error) {
 		return "", "", err
 	}
 	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
-		certOut.Close()
+		_ = certOut.Close()
 		return "", "", err
 	}
-	certOut.Close()
+	_ = certOut.Close()
 
 	// Encode private key to PEM
 	keyBytes, err := x509.MarshalECPrivateKey(priv)
@@ -125,10 +125,10 @@ func EnsureTLSCert() (certFile, keyFile string, err error) {
 		return "", "", err
 	}
 	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}); err != nil {
-		keyOut.Close()
+		_ = keyOut.Close()
 		return "", "", err
 	}
-	keyOut.Close()
+	_ = keyOut.Close()
 
 	log.Printf("TLS certificate written to %s", certFile)
 	log.Printf("TLS private key written to %s", keyFile)
@@ -641,7 +641,7 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	fftCh := s.receiver.SubscribeFFT()
 	defer s.receiver.UnsubscribeFFT(fftCh)
@@ -751,7 +751,7 @@ func (s *Server) handleWSAudio(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	audioCh := s.receiver.SubscribeAudio()
 	defer s.receiver.UnsubscribeAudio(audioCh)
@@ -832,7 +832,7 @@ func (s *Server) handleWSStatus(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	statusCh := s.receiver.SubscribeStatus()
 	defer s.receiver.UnsubscribeStatus(statusCh)
@@ -865,7 +865,7 @@ func (s *Server) handleWSAircraft(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	aircraftCh := s.receiver.SubscribeAircraft()
 	defer s.receiver.UnsubscribeAircraft(aircraftCh)
@@ -954,7 +954,7 @@ func (s *Server) handleWSAPT(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	aptCh := s.receiver.SubscribeAPT()
 	defer s.receiver.UnsubscribeAPT(aptCh)

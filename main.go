@@ -130,7 +130,7 @@ func main() {
 		log.Printf("Shutting down...")
 		receiver.Stop()
 		source.Stop()
-		e.Close()
+		_ = e.Close()
 	}()
 
 	// Start HTTP/HTTPS server

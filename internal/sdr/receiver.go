@@ -584,9 +584,7 @@ func (r *Receiver) processBlock(samples []complex128) {
 		if r.demodType == DemodNOAA && r.aptDecoder != nil {
 			aptLines := r.aptDecoder.Process(leftResampled)
 			// Queue APT lines for broadcast (outside lock)
-			for i := range aptLines {
-				r.aptLinesPending = append(r.aptLinesPending, aptLines[i])
-			}
+			r.aptLinesPending = append(r.aptLinesPending, aptLines...)
 		}
 
 		// 9. Convert to float32
