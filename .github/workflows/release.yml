@@ -82,6 +82,7 @@ jobs:
         with:
           path: ./assets
           merge-multiple: true
+          pattern: go-rtl-sdr-mon-linux-*
 
       - name: Determine tag
         id: tag
