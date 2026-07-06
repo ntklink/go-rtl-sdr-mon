@@ -1,15 +1,18 @@
 package adsb
 
-// CRC polynomial for Mode S / ADS-B: 0x1FFF409 (24-bit)
-// Generator polynomial: G(x) = x^24 + x^23 + x^20 + x^17 + x^13 + x^12 + x^11 +
-//                            x^10 + x^7 + x^5 + x^4 + x^2 + x + 1
-// The 24 most-significant bits of the CRC register form the checksum.
+// CRC polynomial for Mode S / ADS-B (24-bit).
+// Generator: G(x) = x^24 + (0xFFF409), the canonical Mode S polynomial
+// (dump1090 MODES_GENERATOR_POLY 0x1FFF409). The 24 most-significant bits
+// of the CRC register form the checksum.
 
 // crcTable is precomputed for the Mode S CRC.
 var crcTable [256]uint32
 
-// crcGenerator is the Mode S CRC generator polynomial (without the leading 1).
-const crcGenerator = 0xFF_FFF4 // 24-bit polynomial
+// crcGenerator is the Mode S CRC generator polynomial: the lower 24 bits of
+// the canonical Mode S / ADS-B generator (dump1090's MODES_GENERATOR_POLY
+// 0x1FFF409, i.e. x^24 plus the 24-bit value 0xFFF409). The implicit x^24
+// term is cancelled by the masked left shift in the table below.
+const crcGenerator = 0xFFF409 // 24-bit polynomial
 
 func init() {
 	for i := range 256 {
@@ -47,17 +50,15 @@ func checkCRC(msg []byte) bool {
 	return crc == parity
 }
 
-// fixSingleBitError attempts to fix a single-bit error in the message.
+// fixSingleBitError attempts to correct a single-bit error in the message
+// by brute-forcing each payload bit and re-checking the CRC.
 // Returns the corrected message and true if a fix was applied.
 func fixSingleBitError(msg []byte) ([]byte, bool) {
 	if len(msg) != 14 {
 		return msg, false
 	}
-	crc := computeCRC(msg[:11])
-	parity := uint32(msg[11])<<16 | uint32(msg[12])<<8 | uint32(msg[13])
-	_ = crc ^ parity // syndrome
 
-	// Try flipping each bit and check CRC
+	// Try flipping each payload bit (first 88 bits = 11 bytes) and check CRC.
 	for byteIdx := range 11 {
 		for bitIdx := 0; bitIdx < 8; bitIdx++ {
 			fixed := make([]byte, len(msg))

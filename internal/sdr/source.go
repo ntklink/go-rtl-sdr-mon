@@ -28,7 +28,7 @@ type RTLSDRSource struct {
 	// bufferSize is the async read buffer size in bytes (0 = default).
 	bufferSize uint32
 
-	// sampleCh delivers complex64 IQ samples to the consumer.
+	// sampleCh delivers complex128 IQ sample blocks to the consumer.
 	sampleCh chan []complex128
 }
 

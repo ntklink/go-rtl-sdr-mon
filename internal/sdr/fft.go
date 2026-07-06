@@ -68,8 +68,8 @@ func (f *SpectrumFFT) SetMaxHold(on bool) {
 }
 
 // Compute computes the power spectrum in dBFS from complex samples.
-// Returns a slice of length size/2 (positive frequencies).
-// The output is shifted so that DC is in the center (fftshift).
+// Returns a slice of length size (the full spectrum, fftshifted so that DC
+// is in the center, covering -fs/2 .. +fs/2).
 func (f *SpectrumFFT) Compute(samples []complex128) []float32 {
 	n := f.size
 	if len(samples) < n {

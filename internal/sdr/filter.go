@@ -150,20 +150,23 @@ func DesignBandpass(sampleRate, low, high float64, numTaps int) []float64 {
 	return taps
 }
 
-// DesignComplexBandpass designs a complex bandpass FIR filter centered at centerFreq.
-// This is used for frequency shifting + lowpass filtering in one step.
-// The filter shifts the signal by -centerFreq and applies a lowpass with the given half-bandwidth.
+// DesignComplexBandpass designs a complex bandpass FIR filter whose passband
+// is [centerFreq-halfBandwidth, centerFreq+halfBandwidth]. It is a lowpass
+// frequency-shifted to +centerFreq, so its magnitude response is asymmetric
+// (|H(f)| != |H(-f)|) and it can select a single sideband — unlike a real
+// bandpass, which is always symmetric.
 func DesignComplexBandpass(sampleRate, centerFreq, halfBandwidth float64, numTaps int) []complex128 {
 	if numTaps%2 == 0 {
 		numTaps++
 	}
-	// First design a real lowpass
+	// First design a real lowpass (unity DC gain).
 	lp := DesignLowpass(sampleRate, halfBandwidth, numTaps)
 
-	// Then mix with complex oscillator at -centerFreq
+	// Shift the lowpass to +centerFreq: h[k] = lp[k] * exp(+j*wc*k).
+	// This yields H(w) = LP(w - wc), which peaks at w = +wc (i.e. +centerFreq).
 	taps := make([]complex128, numTaps)
 	mid := (numTaps - 1) / 2.0
-	phaseStep := -2 * math.Pi * centerFreq / sampleRate
+	phaseStep := 2 * math.Pi * centerFreq / sampleRate
 	for i := 0; i < numTaps; i++ {
 		phase := phaseStep * float64(i-mid)
 		taps[i] = complex(lp[i]*math.Cos(phase), lp[i]*math.Sin(phase))

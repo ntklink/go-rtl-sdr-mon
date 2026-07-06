@@ -57,29 +57,33 @@ func (r *Resampler) Process(in []float64) []float64 {
 		src = in
 	}
 
+	n := len(src)
+
 	// Estimate output length
-	outLen := int(math.Ceil(float64(len(src)) * r.ratio))
+	outLen := int(math.Ceil(float64(n) * r.ratio))
 	out := make([]float64, 0, outLen)
 
-	for r.phase < float64(len(src))-1 {
+	// Linear interpolation over the extended stream [lastSample, src[0..n-1]].
+	// r.phase is the fractional position of the next output sample, carried
+	// across blocks so the stream stays continuous:
+	//   position 0 == lastSample, position k (k>=1) == src[k-1].
+	// Interpolating between position idx (E[idx]) and idx+1 (E[idx+1]) requires
+	// idx+1 <= n, i.e. r.phase < n.
+	for r.phase < float64(n) {
 		idx := int(r.phase)
 		frac := r.phase - float64(idx)
-
-		// Linear interpolation
-		var s float64
-		if idx == 0 {
-			s = r.lastSample*(1-frac) + src[idx]*frac
-		} else {
-			s = src[idx-1]*(1-frac) + src[idx]*frac
+		a := r.lastSample
+		if idx > 0 {
+			a = src[idx-1]
 		}
-
-		out = append(out, s)
+		b := src[idx]
+		out = append(out, a*(1-frac)+b*frac)
 		r.phase += 1.0 / r.ratio
 	}
 
-	// Adjust phase for next block
-	r.phase -= float64(len(src))
-	r.lastSample = src[len(src)-1]
+	// Carry the remaining fractional position and the last sample to next block.
+	r.phase -= float64(n)
+	r.lastSample = src[n-1]
 
 	return out
 }
@@ -95,20 +99,13 @@ func ResampleComplex(in []complex128, inputRate, outputRate float64) []complex12
 	out := make([]complex128, 0, outLen)
 
 	phase := 0.0
+	// Interpolate between in[idx] and in[idx+1]; needs idx+1 <= len(in)-1.
 	for phase < float64(len(in))-1 {
 		idx := int(phase)
 		frac := phase - float64(idx)
-
-		var s complex128
-		if idx == 0 {
-			s = in[0]
-		} else {
-			re := real(in[idx-1])*(1-frac) + real(in[idx])*frac
-			im := imag(in[idx-1])*(1-frac) + imag(in[idx])*frac
-			s = complex(re, im)
-		}
-
-		out = append(out, s)
+		re := real(in[idx])*(1-frac) + real(in[idx+1])*frac
+		im := imag(in[idx])*(1-frac) + imag(in[idx+1])*frac
+		out = append(out, complex(re, im))
 		phase += 1.0 / ratio
 	}
 

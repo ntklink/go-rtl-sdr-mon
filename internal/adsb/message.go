@@ -75,31 +75,21 @@ func decodeAltitude(me []byte) int {
 	if len(me) < 7 {
 		return 0
 	}
-	// Altitude is encoded in bits 33-45 of ME (13 bits)
-	// Bit 40 (Q bit) determines encoding: Q=1 → 25ft encoding, Q=0 → 100ft (Gillham)
-	// We read bits from the 2nd byte of ME
-	// ME[5] bits 0-7, ME[6] bits 0-4 → bits 33-45 of ME
-
-	// Extract the 12-bit AC field (bits 40-51 of the message = bits 0-11 of ME[5..6])
-	// Actually, altitude is in bits 33-45 of the 56-bit ME field
-	// ME byte indices: ME[0]=bits 0-7, ME[1]=8-15, ME[2]=16-23, ME[3]=24-31,
-	//                  ME[4]=32-39, ME[5]=40-47, ME[6]=48-55
-
-	// The altitude field starts at ME bit 33 (5th bit of ME[4]) and is 12 bits long
-	// But the standard encoding uses:
-	// - ME[5] bits 6-0 (7 bits) + ME[6] bits 7-6 (2 bits) = 9-bit mantissa when Q=1
-	// Actually, let me use the standard bit extraction:
-
-	// Bits 40-52 of the ADS-B message (ME bits 40-52) encode altitude
-	// Q bit is at bit 48 (ME[5] bit 0)
-	qBit := (me[5] >> 0) & 0x01
+	// ME bit numbering (1-indexed, MSB of ME[0] = bit 1):
+	//   ME[0]=bits 1-8, ME[1]=9-16, ME[2]=17-24, ME[3]=25-32,
+	//   ME[4]=33-40, ME[5]=41-48, ME[6]=49-56.
+	// Altitude occupies ME bits 9-20 (12 bits):
+	//   ME[1] (bits 9-16) + the top 4 bits of ME[2] (bits 17-20).
+	// The Q bit is ME bit 16, i.e. the LSB of ME[1] (me[1] & 0x01).
+	qBit := me[1] & 0x01
 
 	if qBit == 1 {
-		// 25-foot encoding
-		// N = (ME[5] & 0xFE) << 3 | (ME[6] >> 5)
-		// But we need to extract bits properly
-		// Bits 40-46 (7 bits, excluding Q bit at 48) and bits 49-52 (4 bits)
-		n := int(me[5]&0xFE)<<3 | int(me[6]>>5)
+		// 25-foot encoding: N is an 11-bit value formed from
+		//   ME bits 9-15  (ME[1] bits 7-1) and
+		//   ME bits 17-20 (ME[2] bits 7-4).
+		// (me[1]&0xFE)<<3 == (me[1]>>1)<<4 places the 7 high bits at
+		// positions 4-10; me[2]>>4 supplies the low 4 bits at positions 0-3.
+		n := int(me[1]&0xFE)<<3 | int(me[2]>>4)
 		return n*25 - 1000
 	}
 
@@ -114,28 +104,25 @@ func decodeAirbornePosition(me []byte) (lat, lon int, isOdd bool) {
 		return 0, 0, false
 	}
 
-	// ME is 56 bits (7 bytes). Bit 1 = MSB of ME[0].
-	//   Bits 1-5:   Type Code (TC)
-	//   Bits 6-7:   Surveillance status (SS)
-	//   Bit 8:      NIC supplement
-	//   Bits 9-20:  Altitude (12 bits)
-	//   Bit 21:     Time
-	//   Bit 22:     CPR format (F flag: 0=even, 1=odd)
-	//   Bits 23-39: CPR latitude (17 bits)
-	//   Bits 40-56: CPR longitude (17 bits)
+	// ME byte indices (ME bit 1 = MSB of ME[0]):
+	//   ME[0]=bits 1-8, ME[1]=9-16, ME[2]=17-24, ME[3]=25-32,
+	//   ME[4]=33-40, ME[5]=41-48, ME[6]=49-56.
 	//
-	// ME[0]=bits 1-8, ME[1]=bits 9-16, ME[2]=bits 17-24, etc.
-	// Bit 22 = ME[2] bit 6 from MSB → (me[2] >> 1) & 1
+	// Bit 22 (CPR format F: 0=even, 1=odd) = ME[2] bit 2 -> (me[2]>>2)&1.
 
 	// CPR format flag: 0=even, 1=odd
-	isOdd = (me[2]>>1)&1 == 1
+	isOdd = (me[2]>>2)&1 == 1
 
-	// CPR latitude: bits 23-39 = 17 bits
-	// ME[2] bits 7-8 (2 bits) + ME[3] (8 bits) + ME[4] bits 1-7 (7 bits)
-	lat = int(me[2]&0x01)<<15 | int(me[3])<<7 | int(me[4]>>1)
+	// CPR latitude: ME bits 23-39 (17 bits)
+	//   bits 23-24 = ME[2] bits 1-0 (2 bits, MSB=bit 23)
+	//   bits 25-32 = ME[3] (8 bits)
+	//   bits 33-39 = ME[4] bits 7-1 (7 bits, MSB=bit 33)
+	lat = int(me[2]&0x03)<<15 | int(me[3])<<7 | int(me[4]>>1)
 
-	// CPR longitude: bits 40-56 = 17 bits
-	// ME[4] bit 8 (1 bit) + ME[5] (8 bits) + ME[6] bits 1-8 (8 bits)
+	// CPR longitude: ME bits 40-56 (17 bits)
+	//   bit 40 = ME[4] bit 0 (1 bit, MSB)
+	//   bits 41-48 = ME[5] (8 bits)
+	//   bits 49-56 = ME[6] (8 bits)
 	lon = int(me[4]&0x01)<<16 | int(me[5])<<8 | int(me[6])
 
 	return lat, lon, isOdd

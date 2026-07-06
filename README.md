@@ -34,20 +34,21 @@ RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canv
 
 | Stage | File | Description |
 |-------|------|-------------|
-| Source | `sdr/source.go` | RTL-SDR async read, 8-bit IQ → complex128 |
-| Device Abstraction | `sdr/device.go` | `SDRDevice` interface, `DeviceManager` for enumeration & hot-swap |
-| FFT | `sdr/fft.go` | Custom radix-2 Cooley-Tukey FFT, Hann window, max-hold with decay |
-| DDC | `sdr/ddc.go` | Digital down-converter (NCO + FIR low-pass + decimation) |
-| Filter | `sdr/filter.go` | Windowed-sinc FIR design (low-pass / band-pass / complex band-pass) |
-| Demodulator | `sdr/demod/` | FM, WFM (mono/stereo/OIRT), AM, AM-Sync (PLL), SSB |
-| AGC | `sdr/agc.go` | AGC with hang, gqrx-matched presets |
-| Resampler | `sdr/resampler.go` | Anti-aliased FIR + linear interpolation to 48 kHz |
-| Receiver | `sdr/receiver.go` | Top-level orchestration, per-client pub/sub for FFT & audio |
-| ADS-B Decoder | `adsb/decoder.go` | IQ → preamble detection → Manchester decoding → CRC verification |
-| ADS-B Messages | `adsb/message.go` | Callsign, altitude, airborne position, velocity extraction |
-| ADS-B CPR | `adsb/cpr.go` | Compact Position Reporting (global + relative) decoding |
-| ADS-B CRC | `adsb/crc.go` | Mode S 24-bit CRC with single-bit error correction |
-| ADS-B Tracker | `adsb/tracker.go` | Multi-aircraft tracking, ICAO-based state merging, CPR caching |
+| Source | `internal/sdr/source.go` | RTL-SDR async read, 8-bit IQ → complex128 |
+| Device Abstraction | `internal/sdr/device.go` | `SDRDevice` interface, `DeviceManager` for enumeration & hot-swap |
+| FFT | `internal/sdr/fft.go` | Custom radix-2 Cooley-Tukey FFT, Hann window, max-hold with decay |
+| DDC | `internal/sdr/ddc.go` | Digital down-converter (NCO + FIR low-pass + decimation) |
+| Filter | `internal/sdr/filter.go` | Windowed-sinc FIR design (low-pass / band-pass / complex band-pass) |
+| Demodulator | `internal/demod/` | FM, WFM (mono/stereo/OIRT), AM, AM-Sync (PLL), SSB |
+| AGC | `internal/sdr/agc.go` | AGC with hang, gqrx-matched presets |
+| Resampler | `internal/sdr/resampler.go` | Anti-aliased FIR + linear interpolation to 48 kHz |
+| Receiver | `internal/sdr/receiver.go` | Top-level orchestration, per-client pub/sub for FFT & audio, source hot-swap |
+| ADS-B Decoder | `internal/adsb/decoder.go` | IQ → preamble detection → Manchester decoding → CRC verification |
+| ADS-B Messages | `internal/adsb/message.go` | Callsign, altitude, airborne position, velocity extraction |
+| ADS-B CPR | `internal/adsb/cpr.go` | Compact Position Reporting (global + relative) decoding |
+| ADS-B CRC | `internal/adsb/crc.go` | Mode S 24-bit CRC with single-bit error correction |
+| ADS-B Tracker | `internal/adsb/tracker.go` | Multi-aircraft tracking, ICAO-based state merging, CPR caching |
+| NOAA APT | `internal/noaa/apt.go` | 2.4 kHz subcarrier AM demod, sync detection, image assembly |
 
 ## Build
 
@@ -179,39 +180,42 @@ Open `https://localhost:8080` in your browser.
 ├── main.go                  # Entry point, CLI flags, server startup
 ├── server.go                # HTTP API + WebSocket handlers
 ├── Makefile                 # Build script (output → bin/)
-├── sdr/
-│   ├── device.go            # SDRDevice interface, DeviceManager
-│   ├── source.go            # RTL-SDR implementation of SDRDevice
-│   ├── receiver.go          # Top-level receiver orchestration
-│   ├── fft.go               # Custom radix-2 complex FFT
-│   ├── ddc.go               # Digital down-converter
-│   ├── filter.go            # FIR/IIR filter design
-│   ├── agc.go               # Automatic gain control
-│   ├── resampler.go         # Anti-aliased audio resampler
-│   └── demod/
-│       ├── demod.go         # Demodulator interface & type enum
-│       ├── fm.go            # Narrow-band FM
-│       ├── wfm.go           # Wide-band FM (mono/stereo/OIRT)
-│       ├── am.go            # AM envelope detector
-│       ├── amsync.go        # AM synchronous detector (PLL)
-│       └── ssb.go           # SSB
-├── adsb/
-│   ├── types.go             # Aircraft & Message structs
-│   ├── decoder.go           # IQ → ADS-B message detection pipeline
-│   ├── message.go           # Field extraction (callsign, altitude, etc.)
-│   ├── cpr.go               # Compact Position Reporting decoding
-│   ├── crc.go               # Mode S 24-bit CRC + error correction
-│   └── tracker.go           # Multi-aircraft tracking
-├── noaa/
-│   ├── types.go             # Satellite info, APT line/image types, pixel geometry
-│   └── apt.go               # APT decoder: 2.4kHz subcarrier AM demod, sync detection, image assembly
+├── internal/
+│   ├── sdr/
+│   │   ├── device.go        # SDRDevice interface, DeviceManager
+│   │   ├── source.go        # RTL-SDR implementation of SDRDevice
+│   │   ├── receiver.go      # Top-level receiver orchestration (source hot-swap)
+│   │   ├── fft.go           # Custom radix-2 complex FFT
+│   │   ├── ddc.go           # Digital down-converter
+│   │   ├── filter.go        # FIR/IIR filter design (incl. complex band-pass)
+│   │   ├── agc.go           # Automatic gain control
+│   │   ├── resampler.go     # Anti-aliased audio resampler
+│   │   └── *_test.go        # Resampler / spectrum / filter tests
+│   ├── demod/
+│   │   ├── demod.go         # Demodulator interface & type enum
+│   │   ├── fm.go            # Narrow-band FM
+│   │   ├── wfm.go           # Wide-band FM (mono/stereo/OIRT)
+│   │   ├── am.go            # AM envelope detector
+│   │   ├── amsync.go        # AM synchronous detector (PLL)
+│   │   └── ssb.go           # SSB
+│   ├── adsb/
+│   │   ├── types.go         # Aircraft & Message structs
+│   │   ├── decoder.go       # IQ → ADS-B message detection pipeline
+│   │   ├── message.go       # Field extraction (callsign, altitude, etc.)
+│   │   ├── cpr.go           # Compact Position Reporting decoding
+│   │   ├── crc.go           # Mode S 24-bit CRC + error correction
+│   │   ├── tracker.go       # Multi-aircraft tracking
+│   │   └── *_test.go        # CRC / message / tracker tests
+│   └── noaa/
+│       ├── types.go         # Satellite info, APT line/image types, pixel geometry
+│       └── apt.go           # APT decoder: 2.4kHz subcarrier AM demod, sync detection, image assembly
 ├── web/                     # Vue 3 + Reka UI frontend
 │   ├── src/
 │   │   ├── App.vue          # Main layout (top bar + tabs + waterfall/map)
 │   │   ├── components/      # Waterfall, FrequencyControl, ReceiverPanel,
 │   │   │                    # GainPanel, AudioPlayer, DeviceSelector,
 │   │   │                    # AircraftMap, AircraftPanel, NoAAPanel
-│   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
+│   │   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
 │   │   │                    # useI18n, useAircraft, useDebounce, useNoAA
 │   │   └── styles/          # main.css, reka-ui.css
 │   └── dist/                # Build output (embedded via //go:embed)

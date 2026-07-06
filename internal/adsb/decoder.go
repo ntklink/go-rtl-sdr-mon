@@ -98,7 +98,7 @@ func (d *Decoder) Process(samples []complex128) []*Message {
 
 	// 5. Scan for preambles
 	i := 0
-	for i < len(mags)-totalLen {
+	for i+totalLen <= len(mags) {
 		if d.detectPreamble(mags, i, spb) {
 			// Decode the 112-bit message
 			msg := d.decodeBits(mags, i+preambleLen, spb)

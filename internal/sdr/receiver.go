@@ -1,6 +1,7 @@
 package sdr
 
 import (
+	"log"
 	"math"
 	"sync"
 	"time"
@@ -110,7 +111,8 @@ type Receiver struct {
 	source   SDRDevice
 	spectrum *SpectrumFFT
 	ddc      *DDC
-	agc      *AGC
+	agc      *AGC // left/mono channel AGC
+	agcR     *AGC // right-channel AGC (stereo), so L/R gains are independent
 
 	demod     demod.Demodulator
 	demodType DemodType
@@ -162,6 +164,7 @@ type Receiver struct {
 	fftLastTime time.Time // last FFT output time
 	running     bool
 	stopCh      chan struct{}
+	loopDone    chan struct{} // closed when processLoop exits (for source swaps)
 
 	// Configuration
 	config ReceiverConfig
@@ -210,6 +213,7 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 		spectrum:     NewSpectrumFFT(8192, 0.3),
 		ddc:          NewDDC(float64(config.SampleRate), config.FilterOffset, TargetQuadRate),
 		agc:          NewAGC(TargetQuadRate),
+		agcR:         NewAGC(TargetQuadRate),
 		config:       config,
 		squelchLevel: config.SquelchLevel,
 		filterLow:    config.FilterLow,
@@ -223,6 +227,7 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 		aircraftSubs: make(map[chan []adsb.Aircraft]struct{}),
 		aptSubs:      make(map[chan noaa.APTLine]struct{}),
 		stopCh:       make(chan struct{}),
+		loopDone:     func() chan struct{} { c := make(chan struct{}); close(c); return c }(),
 		fftRate:      25.0, // 25 fps (gqrx default)
 	}
 
@@ -231,8 +236,9 @@ func NewReceiver(source SDRDevice, config ReceiverConfig) *Receiver {
 	r.audioResampler = NewResampler(quadRate, AudioRate)
 	r.audioResamplerR = NewResampler(quadRate, AudioRate)
 
-	// Set up AGC with medium preset (gqrx default)
+	// Set up AGC (both channels) with medium preset (gqrx default)
 	r.agc.SetPreset(AGCPresetMedium)
+	r.agcR.SetPreset(AGCPresetMedium)
 	r.config.AGCOn = true
 
 	// Set up ADS-B decoder and tracker
@@ -415,9 +421,11 @@ func (r *Receiver) Start() {
 	}
 	r.running = true
 	r.stopCh = make(chan struct{})
+	r.loopDone = make(chan struct{})
+	done := r.loopDone
 	r.mu.Unlock()
 
-	go r.processLoop()
+	go r.processLoop(done)
 }
 
 // Stop stops the receiver processing loop.
@@ -431,8 +439,63 @@ func (r *Receiver) Stop() {
 	r.running = false
 }
 
+// ReplaceSource atomically swaps the SDR source. It stops the processing
+// loop, stops the old source's stream, rebuilds all rate-dependent DSP for
+// the new source's sample rate, starts the new source's stream, and restarts
+// processing. Safe to call from an HTTP handler while the receiver is running.
+func (r *Receiver) ReplaceSource(newSource SDRDevice) {
+	// 1. Stop the processing loop and wait for it to exit (without holding
+	//    r.mu during the wait, since processLoop needs it to finish its
+	//    current block).
+	r.mu.Lock()
+	wasRunning := r.running
+	old := r.source
+	if wasRunning {
+		close(r.stopCh)
+		r.running = false
+	}
+	done := r.loopDone
+	r.mu.Unlock()
+	if wasRunning {
+		<-done
+	}
+
+	// 2. Stop the old source's stream (no one is reading its samples now).
+	if old != nil && old != newSource {
+		old.Stop()
+	}
+
+	// 3. Swap source and rebuild rate-dependent DSP for the new sample rate.
+	r.mu.Lock()
+	r.source = newSource
+	newRate := newSource.GetSampleRate()
+	r.config.SampleRate = newRate
+	r.config.CenterFreq = newSource.GetCenterFreq()
+	r.ddc = NewDDC(float64(newRate), r.filterOffset, TargetQuadRate)
+	quadRate := r.ddc.QuadRate()
+	r.audioResampler = NewResampler(quadRate, AudioRate)
+	r.audioResamplerR = NewResampler(quadRate, AudioRate)
+	r.agc.SetSampleRate(quadRate)
+	r.agcR.SetSampleRate(quadRate)
+	r.adsbDecoder = adsb.NewDecoder(float64(newRate))
+	r.aptDecoder = noaa.NewAPTDecoder(float64(AudioRate))
+	r.setDemodulator(r.demodType)
+	r.mu.Unlock()
+
+	// 4. Start the new source's stream (Start blocks, so run it in a goroutine).
+	go func() {
+		if err := newSource.Start(); err != nil {
+			log.Printf("SDR source error: %v", err)
+		}
+	}()
+
+	// 5. Restart the processing loop.
+	r.Start()
+}
+
 // processLoop is the main DSP processing loop.
-func (r *Receiver) processLoop() {
+func (r *Receiver) processLoop(done chan struct{}) {
+	defer close(done)
 	sampleCh := r.source.Samples()
 	statusTicker := 0
 
@@ -502,10 +565,10 @@ func (r *Receiver) processBlock(samples []complex128) {
 	} else if r.demod != nil {
 		left, right := r.demod.Process(filtered)
 
-		// 7. AGC
+		// 7. AGC (independent per channel so stereo L/R gains don't cross-couple)
 		left = r.agc.Process(left)
 		if right != nil {
-			right = r.agc.Process(right)
+			right = r.agcR.Process(right)
 		}
 
 		// 8. Audio resampling
@@ -614,9 +677,7 @@ func (r *Receiver) updateFilter() {
 		high = nyq * 0.1
 	}
 
-	// Design complex bandpass filter centered at 0
-	// Actually, we use a real bandpass since the signal is already at baseband
-	// after DDC. We need a bandpass that passes [low, high].
+	// Design the bandpass filter.
 	// Number of taps depends on filter shape (more taps = sharper)
 	numTaps := 65 // NORMAL default
 	switch r.filterShape {
@@ -626,7 +687,8 @@ func (r *Receiver) updateFilter() {
 		numTaps = 127
 	}
 	if low < 0 && high > 0 {
-		// Bandpass includes DC, so use a lowpass with cutoff = high
+		// Passband includes DC (double-sideband modes: AM/NFM/WFM/CW/Raw).
+		// A real lowpass is sufficient and has the correct symmetric response.
 		taps := DesignLowpass(sampleRate, high, numTaps)
 		ctaps := make([]complex128, len(taps))
 		for i, t := range taps {
@@ -634,12 +696,16 @@ func (r *Receiver) updateFilter() {
 		}
 		r.bpComplex = NewFIRComplexFilter(ctaps)
 	} else {
-		// True bandpass
-		taps := DesignBandpass(sampleRate, math.Abs(low), math.Abs(high), numTaps)
-		ctaps := make([]complex128, len(taps))
-		for i, t := range taps {
-			ctaps[i] = complex(t, 0)
+		// Asymmetric passband (SSB: USB = [low, high] > 0, LSB = < 0). A real
+		// FIR has |H(f)| = |H(-f)| and cannot reject the opposite sideband, so
+		// use a complex bandpass (frequency-shifted lowpass) whose response is
+		// asymmetric and passes only [center-halfBW, center+halfBW].
+		center := (low + high) / 2
+		halfBW := high - low
+		if halfBW < 0 {
+			halfBW = -halfBW
 		}
+		ctaps := DesignComplexBandpass(sampleRate, center, halfBW, numTaps)
 		r.bpComplex = NewFIRComplexFilter(ctaps)
 	}
 }
@@ -814,6 +880,9 @@ func (r *Receiver) reconfigureSampleRate(newRate uint32) error {
 	quadRate := r.ddc.QuadRate()
 	r.audioResampler = NewResampler(quadRate, AudioRate)
 	r.audioResamplerR = NewResampler(quadRate, AudioRate)
+	// Keep AGC time constants correct for the new quad rate
+	r.agc.SetSampleRate(quadRate)
+	r.agcR.SetSampleRate(quadRate)
 	// Recreate ADS-B decoder with new sample rate
 	r.adsbDecoder = adsb.NewDecoder(float64(newRate))
 	// Recreate APT decoder (audio rate unchanged but reset state)
@@ -870,6 +939,7 @@ func (r *Receiver) SetAGC(on bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.agc.SetEnabled(on)
+	r.agcR.SetEnabled(on)
 	r.config.AGCOn = on
 }
 
@@ -930,12 +1000,22 @@ func (r *Receiver) SetAGCPreset(preset AGCPreset) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.agc.SetPreset(preset)
+	r.agcR.SetPreset(preset)
 	r.config.AGCOn = preset != AGCPresetOff
 }
 
 // GetSpectrumSize returns the FFT size.
 func (r *Receiver) GetSpectrumSize() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.spectrum.Size()
+}
+
+// Source returns the SDR source currently feeding the receiver.
+func (r *Receiver) Source() SDRDevice {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.source
 }
 
 // GetConfig returns the current configuration.

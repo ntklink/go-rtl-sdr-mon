@@ -16,8 +16,9 @@ type WFMDemod struct {
 	oirt     bool // OIRT stereo standard (31.25kHz pilot)
 
 	prevSample complex128
+	initialized bool // whether prevSample holds a real sample
 
-	// De-emphasis (only for stereo, gqrx disables for mono)
+	// De-emphasis (applied to both mono and stereo, matching gqrx wfmrx)
 	deemphL *iirFilter
 	deemphR *iirFilter
 
@@ -113,8 +114,10 @@ func (d *WFMDemod) Process(in []complex128) (left, right []float64) {
 	// FM demodulation (quadrature detection)
 	demod := make([]float64, len(in))
 	for i, s := range in {
-		if i == 0 && d.prevSample == 0 {
+		if i == 0 && !d.initialized {
+			// First sample ever: no previous sample to differentiate against.
 			d.prevSample = s
+			d.initialized = true
 			demod[i] = 0
 			continue
 		}

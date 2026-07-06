@@ -75,6 +75,11 @@ type APTDecoder struct {
 	// Image storage
 	lines    [][]byte // decoded lines (each 2080 bytes)
 	maxLines int      // maximum lines to store
+	ringIdx  int      // next write index in the ring buffer (lines)
+
+	// Brightness reference: a slowly-tracking peak used to scale every line
+	// consistently (per-line min/max stretching destroys inter-line continuity).
+	peakEnv float64
 
 	// Statistics
 	linesDecoded int
@@ -266,28 +271,28 @@ func (d *APTDecoder) finalizeLine() (APTLine, bool) {
 	// Take exactly LinePixels samples
 	line := make([]byte, LinePixels)
 
-	// Normalize pixel values to 0-255
-	// Find min/max for auto-scaling
-	var minV, maxV float64
-	minV = d.pixelBuf[0]
-	maxV = d.pixelBuf[0]
+	// Update the running brightness reference (peak with slow EMA decay) so
+	// every line is scaled by the same reference, preserving relative
+	// brightness across the image instead of stretching each line to 0..255.
+	var lineMax float64
 	for i := 0; i < LinePixels; i++ {
 		v := d.pixelBuf[i]
-		if v < minV {
-			minV = v
-		}
-		if v > maxV {
-			maxV = v
+		if v > lineMax {
+			lineMax = v
 		}
 	}
-
-	rangeV := maxV - minV
-	if rangeV < 1e-6 {
-		rangeV = 1
+	if lineMax > d.peakEnv {
+		d.peakEnv = lineMax
+	} else {
+		d.peakEnv = d.peakEnv*0.9 + lineMax*0.1
+	}
+	peak := d.peakEnv
+	if peak < 1e-6 {
+		peak = 1
 	}
 
 	for i := 0; i < LinePixels; i++ {
-		v := (d.pixelBuf[i] - minV) / rangeV
+		v := d.pixelBuf[i] / peak
 		if v < 0 {
 			v = 0
 		}
@@ -304,13 +309,12 @@ func (d *APTDecoder) finalizeLine() (APTLine, bool) {
 	d.lineCount++
 	d.linesDecoded++
 
-	// Store in image buffer
+	// Store in image buffer (ring buffer)
 	if len(d.lines) < d.maxLines {
 		d.lines = append(d.lines, line)
 	} else {
-		// Circular buffer: replace oldest
-		idx := d.lineCount % d.maxLines
-		d.lines[idx] = line
+		d.lines[d.ringIdx] = line
+		d.ringIdx = (d.ringIdx + 1) % d.maxLines
 	}
 
 	// Reset for next line
@@ -344,6 +348,8 @@ func (d *APTDecoder) Reset() {
 	d.syncLocked = false
 	d.lineOffset = 0
 	d.lines = d.lines[:0]
+	d.ringIdx = 0
+	d.peakEnv = 0
 	d.decimPhase = 0
 	d.decimAccum = 0
 	d.decimCount = 0

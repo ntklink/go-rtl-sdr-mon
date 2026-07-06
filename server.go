@@ -279,39 +279,38 @@ func (s *Server) handleSelectDevice(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing device id"})
 	}
 
-	// Check if already open
-	if dev, ok := s.dm.Get(req.ID); ok {
-		// Just set as active
-		if err := s.dm.SetActive(req.ID); err != nil {
+	// Open the device if it isn't open yet.
+	dev, ok := s.dm.Get(req.ID)
+	if !ok {
+		config := s.receiver.GetConfig()
+		d, err := s.dm.Open(req.ID, config.SampleRate, config.CenterFreq)
+		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-		_ = dev // device already open
+		dev = d
+		// Apply current receiver settings to the newly opened device.
+		if config.FreqCorrection != 0 {
+			_ = dev.SetFreqCorrection(config.FreqCorrection)
+		}
+		if !config.AutoGain {
+			_ = dev.SetAutoGain(false)
+			if config.Gain != 0 {
+				_ = dev.SetGain(config.Gain)
+			}
+		}
+	}
+
+	// Already the receiver's active source? Nothing to switch.
+	if cur := s.receiver.Source(); cur != nil && cur == dev {
+		_ = s.dm.SetActive(req.ID)
 		return c.JSON(http.StatusOK, map[string]string{"id": req.ID, "status": "active"})
 	}
 
-	// Need to open the device
-	// Get current config from receiver to apply to new device
-	config := s.receiver.GetConfig()
-	dev, err := s.dm.Open(req.ID, config.SampleRate, config.CenterFreq)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
-	// Apply current settings to new device
-	if config.FreqCorrection != 0 {
-		_ = dev.SetFreqCorrection(config.FreqCorrection)
-	}
-	if !config.AutoGain {
-		_ = dev.SetAutoGain(false)
-		if config.Gain != 0 {
-			_ = dev.SetGain(config.Gain)
-		}
-	}
-
-	if err := s.dm.SetActive(req.ID); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-	}
-
+	// Hand the new source to the receiver: it stops the old source's stream,
+	// rebuilds rate-dependent DSP, starts the new source, and restarts
+	// processing. Without this the receiver kept reading the old device.
+	s.receiver.ReplaceSource(dev)
+	_ = s.dm.SetActive(req.ID)
 	return c.JSON(http.StatusOK, map[string]string{"id": req.ID, "status": "opened"})
 }
 
@@ -664,6 +663,10 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 		return nil
 	}
 
+	// Keepalive ping (reusable ticker avoids accumulating timers per iteration)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case data, ok := <-fftCh:
@@ -679,7 +682,7 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 			if err := ws.WriteMessage(websocket.BinaryMessage, buf); err != nil {
 				return nil
 			}
-		case <-time.After(30 * time.Second):
+		case <-ticker.C:
 			// Keepalive
 			if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return nil
@@ -784,7 +787,13 @@ func (s *Server) handleWSAudio(c echo.Context) error {
 			channels = 2
 		}
 
+		// The L/R resamplers are independent and may produce blocks that differ
+		// in length by a sample; use the shorter length to avoid out-of-range.
 		numSamples := len(audio.Left)
+		if channels == 2 && len(audio.Right) < numSamples {
+			numSamples = len(audio.Right)
+		}
+
 		bufLen := 1 + 4 + numSamples*channels*2
 		buf := make([]byte, bufLen)
 		buf[0] = byte(channels)

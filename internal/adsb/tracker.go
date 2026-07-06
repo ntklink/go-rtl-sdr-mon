@@ -20,8 +20,9 @@ type Tracker struct {
 	cprOddTime  map[string]time.Time
 
 	// Receiver position for relative CPR decoding
-	refLat float64
-	refLon float64
+	refLat    float64
+	refLon    float64
+	hasRefPos bool
 }
 
 // NewTracker creates a new aircraft tracker.
@@ -38,9 +39,13 @@ func NewTracker() *Tracker {
 }
 
 // SetReceiverPosition sets the receiver's position for relative CPR decoding.
+// Safe for concurrent use (refLat/refLon are read under t.mu in decodePosition).
 func (t *Tracker) SetReceiverPosition(lat, lon float64) {
+	t.mu.Lock()
 	t.refLat = lat
 	t.refLon = lon
+	t.hasRefPos = true
+	t.mu.Unlock()
 }
 
 // ProcessMessage processes a decoded ADS-B message and updates aircraft state.
@@ -131,14 +136,14 @@ func (t *Tracker) decodePosition(aircraft *Aircraft, icao string) {
 				aircraft.Longitude = lon
 			}
 		}
-	} else if hasEven && t.refLat != 0 {
+	} else if hasEven && t.hasRefPos {
 		// Relative CPR decoding using receiver position
 		lat, lon, ok := decodeCPRRelative(evenLat, evenLon, false, t.refLat, t.refLon)
 		if ok {
 			aircraft.Latitude = lat
 			aircraft.Longitude = lon
 		}
-	} else if hasOdd && t.refLat != 0 {
+	} else if hasOdd && t.hasRefPos {
 		lat, lon, ok := decodeCPRRelative(oddLat, oddLon, true, t.refLat, t.refLon)
 		if ok {
 			aircraft.Latitude = lat

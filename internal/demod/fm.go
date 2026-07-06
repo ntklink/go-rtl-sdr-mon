@@ -7,13 +7,14 @@ import (
 // FMDemod implements an FM demodulator using quadrature detection.
 // It supports both narrow-band and wide-band FM with de-emphasis.
 type FMDemod struct {
-	quadRate   float64
-	maxDev     float64 // maximum deviation in Hz
-	tau        float64 // de-emphasis time constant (0 = disabled)
-	gain       float64 // demodulator gain
-	prevSample complex128
-	deemph     *iirFilter
-	hasDeemph  bool
+	quadRate    float64
+	maxDev      float64 // maximum deviation in Hz
+	tau         float64 // de-emphasis time constant (0 = disabled)
+	gain        float64 // demodulator gain
+	prevSample  complex128
+	initialized bool // whether prevSample holds a real sample
+	deemph      *iirFilter
+	hasDeemph   bool
 }
 
 // iirFilter is a simple first-order IIR filter (local copy to avoid import cycle).
@@ -126,8 +127,10 @@ func (d *FMDemod) Process(in []complex128) (left, right []float64) {
 	out := make([]float64, len(in))
 
 	for i, s := range in {
-		if i == 0 && d.prevSample == 0 {
+		if i == 0 && !d.initialized {
+			// First sample ever: no previous sample to differentiate against.
 			d.prevSample = s
+			d.initialized = true
 			out[i] = 0
 			continue
 		}

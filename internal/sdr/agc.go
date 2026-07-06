@@ -67,6 +67,13 @@ func (a *AGC) SetDecay(decay float64) {
 	a.decayRate = math.Exp(-1.0 / (a.sampleRate * a.decay / 1000.0))
 }
 
+// SetSampleRate updates the sample rate and recomputes the decay rate so
+// the AGC time constants stay correct after a sample-rate change.
+func (a *AGC) SetSampleRate(rate float64) {
+	a.sampleRate = rate
+	a.decayRate = math.Exp(-1.0 / (a.sampleRate * a.decay / 1000.0))
+}
+
 // AGCPreset represents an AGC preset.
 type AGCPreset int
 
