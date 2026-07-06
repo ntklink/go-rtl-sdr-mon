@@ -1,9 +1,7 @@
 # webs
 web/dist
 web/node_modules
-web/package-lock.json
 
 # golang
-go.sum
 bin/go-rtl-sdr-mon*
 dist/*
