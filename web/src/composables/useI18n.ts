@@ -78,6 +78,9 @@ const messages: Record<string, Record<string, string>> = {
     'adsb.geoDenied': '定位权限被拒绝',
     'adsb.geoUnavailable': '无法获取位置信息',
     'adsb.geoTimeout': '定位超时',
+    'adsb.detected': '检测',
+    'adsb.valid': '有效',
+    'adsb.tip': '提示：确保采样率为 2 MHz，频率为 1090 MHz，增益调高或开启自动增益。需要 1090 MHz 天线。',
   },
 
   'en': {
@@ -149,6 +152,9 @@ const messages: Record<string, Record<string, string>> = {
     'adsb.geoDenied': 'Location permission denied',
     'adsb.geoUnavailable': 'Position unavailable',
     'adsb.geoTimeout': 'Location request timed out',
+    'adsb.detected': 'Detected',
+    'adsb.valid': 'Valid',
+    'adsb.tip': 'Tip: Ensure sample rate is 2 MHz, frequency is 1090 MHz, gain is high or auto. A 1090 MHz antenna is required.',
   },
 }
 

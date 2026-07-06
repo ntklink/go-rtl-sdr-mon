@@ -209,6 +209,7 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	api.GET("/ws/aircraft", s.handleWSAircraft)
 	api.POST("/receiver-position", s.handleSetReceiverPosition)
 	api.GET("/aircraft", s.handleGetAircraft)
+	api.GET("/adsb-stats", s.handleADSBStats)
 }
 
 // --- REST API Handlers ---
@@ -895,4 +896,14 @@ func (s *Server) handleSetReceiverPosition(c echo.Context) error {
 	}
 	s.receiver.SetReceiverPosition(req.Latitude, req.Longitude)
 	return c.JSON(http.StatusOK, req)
+}
+
+// handleADSBStats returns ADS-B decoder statistics for debugging.
+func (s *Server) handleADSBStats(c echo.Context) error {
+	detected, valid, aircraftCount := s.receiver.GetADSBStats()
+	return c.JSON(http.StatusOK, map[string]int{
+		"detected": detected,
+		"valid":    valid,
+		"aircraft": aircraftCount,
+	})
 }

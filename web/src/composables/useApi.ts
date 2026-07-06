@@ -44,5 +44,6 @@ export function useApi() {
     setFilterShape: (shape: string) => postJSON('/filter-shape', { shape }),
     setFilterPreset: (preset: string) => postJSON('/filter-preset', { preset }),
     setReceiverPosition: (latitude: number, longitude: number) => postJSON('/receiver-position', { latitude, longitude }),
+    getADSBStats: () => getJSON('/adsb-stats'),
   }
 }

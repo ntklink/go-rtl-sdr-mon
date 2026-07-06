@@ -2,6 +2,20 @@
   <div class="panel adsb-panel">
     <h3>{{ t('adsb.aircraft') }} ({{ aircraft.length }})</h3>
 
+    <div class="stats-bar" v-if="stats">
+      <span class="stat-item">
+        <span class="stat-label">{{ t('adsb.detected') }}:</span>
+        <span class="stat-value" :class="{ zero: stats.detected === 0 }">{{ stats.detected }}</span>
+      </span>
+      <span class="stat-item">
+        <span class="stat-label">{{ t('adsb.valid') }}:</span>
+        <span class="stat-value" :class="{ zero: stats.valid === 0 }">{{ stats.valid }}</span>
+      </span>
+    </div>
+    <div class="tip-bar" v-if="stats && stats.detected === 0">
+      {{ t('adsb.tip') }}
+    </div>
+
     <div class="control-group">
       <label>{{ t('adsb.rxPos') }}</label>
       <div class="rx-pos-row">
@@ -58,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAircraft, type Aircraft } from '../composables/useAircraft'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
@@ -74,6 +88,17 @@ const rxLon = ref<number | undefined>(undefined)
 const selectedICAO = ref('')
 const geoLoading = ref(false)
 const geoError = ref('')
+const stats = ref<{ detected: number; valid: number; aircraft: number } | null>(null)
+let statsTimer: ReturnType<typeof setInterval> | null = null
+
+async function pollStats() {
+  try {
+    const s = await api.getADSBStats()
+    stats.value = s
+  } catch {
+    // ignore
+  }
+}
 
 // Sync receiver position from backend status (e.g. after page refresh)
 watch(statusLoaded, (loaded) => {
@@ -151,6 +176,16 @@ onMounted(() => {
     rxLat.value = status.value.RxLat
     rxLon.value = status.value.RxLon
   }
+  // Poll ADS-B decoder stats every 2 seconds
+  pollStats()
+  statsTimer = setInterval(pollStats, 2000)
+})
+
+onUnmounted(() => {
+  if (statsTimer) {
+    clearInterval(statsTimer)
+    statsTimer = null
+  }
 })
 </script>
 
@@ -161,6 +196,44 @@ onMounted(() => {
   gap: 8px;
   max-height: 100%;
   overflow: hidden;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 12px;
+  padding: 4px 8px;
+  background: #1a1a2e;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.stat-item {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.stat-label {
+  color: #888;
+}
+
+.stat-value {
+  color: #4a4;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+}
+
+.stat-value.zero {
+  color: #a44;
+}
+
+.tip-bar {
+  font-size: 10px;
+  color: #aa0;
+  padding: 4px 8px;
+  background: #2a2a10;
+  border-radius: 4px;
+  line-height: 1.4;
 }
 
 .rx-pos-row {

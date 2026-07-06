@@ -138,6 +138,9 @@ type Receiver struct {
 	rxLat        float64
 	rxLon        float64
 
+	// Previous sample rate (saved when switching to ADS-B, restored when switching away)
+	prevSampleRate uint32
+
 	// Output subscribers (per-client channels)
 	audioSubs map[chan AudioBlock]struct{}
 	fftSubs   map[chan []float32]struct{}
@@ -582,10 +585,25 @@ func (r *Receiver) updateFilter() {
 	}
 }
 
+// ADS-B recommended sample rate (2 MHz = exactly 2 samples per bit)
+const ADSBSampleRate = 2000000
+
 // setDemodulator creates the appropriate demodulator for the given type
 // and auto-adjusts the filter bandwidth to the NORMAL preset for that mode
 // (matching gqrx behavior exactly).
 func (r *Receiver) setDemodulator(dt DemodType) {
+	// If switching from ADS-B to another mode, restore the previous sample rate
+	if r.demodType == DemodADSB && dt != DemodADSB && r.prevSampleRate != 0 {
+		_ = r.reconfigureSampleRate(r.prevSampleRate)
+		r.prevSampleRate = 0
+	}
+
+	// If switching to ADS-B, ensure sample rate is 2 MHz for reliable decoding
+	if dt == DemodADSB && r.config.SampleRate != ADSBSampleRate {
+		r.prevSampleRate = r.config.SampleRate
+		_ = r.reconfigureSampleRate(ADSBSampleRate)
+	}
+
 	r.demodType = dt
 	quadRate := r.ddc.QuadRate()
 
@@ -715,6 +733,39 @@ func (r *Receiver) SetFilter(low, high float64) {
 	r.filterLow = low
 	r.filterHigh = high
 	r.updateFilter()
+}
+
+// reconfigureSampleRate changes the sample rate on the source device and
+// reinitializes all rate-dependent DSP components (DDC, resamplers, ADS-B decoder).
+// Must be called with r.mu held.
+func (r *Receiver) reconfigureSampleRate(newRate uint32) error {
+	if r.source.GetSampleRate() == newRate {
+		return nil
+	}
+	if err := r.source.SetSampleRate(newRate); err != nil {
+		return err
+	}
+	r.config.SampleRate = newRate
+	// Recreate DDC with new input rate
+	r.ddc = NewDDC(float64(newRate), r.filterOffset, TargetQuadRate)
+	// Recreate audio resamplers (quad rate may have changed)
+	quadRate := r.ddc.QuadRate()
+	r.audioResampler = NewResampler(quadRate, AudioRate)
+	r.audioResamplerR = NewResampler(quadRate, AudioRate)
+	// Recreate ADS-B decoder with new sample rate
+	r.adsbDecoder = adsb.NewDecoder(float64(newRate))
+	// Update bandpass filter for new quad rate
+	r.updateFilter()
+	return nil
+}
+
+// GetADSBStats returns ADS-B decoder statistics.
+func (r *Receiver) GetADSBStats() (detected, valid, aircraftCount int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	detected, valid = r.adsbDecoder.Stats()
+	aircraftCount = r.adsbTracker.Count()
+	return
 }
 
 // SetDemod sets the demodulator type.

@@ -1,6 +1,7 @@
 package adsb
 
 import (
+	"log"
 	"math"
 )
 
@@ -53,8 +54,9 @@ func (d *Decoder) Process(samples []complex128) []*Message {
 	}
 
 	spb := int(d.samplesPerBit) // samples per bit (should be 2 at 2 MHz)
-	if spb < 1 {
-		spb = 1
+	if spb < 2 {
+		log.Printf("ADS-B: sample rate too low for reliable decoding (spb=%d, sampleRate=%.0f Hz, need >= 2 MHz)", spb, d.sampleRate)
+		return nil
 	}
 
 	// Preamble pattern: at 2 MHz, 2 samples per μs
@@ -162,7 +164,7 @@ func (d *Decoder) detectPreamble(mags []float64, pos, spb int) bool {
 	lowAvg := lowSum / 4
 
 	// High pulses must be significantly higher than low positions
-	if highAvg < lowAvg*2 || highAvg < 0.5 {
+	if highAvg < lowAvg*1.5 || highAvg < 0.3 {
 		return false
 	}
 
