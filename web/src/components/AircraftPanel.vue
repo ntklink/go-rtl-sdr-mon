@@ -11,6 +11,10 @@
         <span class="stat-label">{{ t('adsb.valid') }}:</span>
         <span class="stat-value" :class="{ zero: stats.valid === 0 }">{{ stats.valid }}</span>
       </span>
+      <span class="stat-item">
+        <span class="stat-label">{{ t('adsb.accepted') }}:</span>
+        <span class="stat-value" :class="{ zero: stats.accepted === 0 }">{{ stats.accepted }}</span>
+      </span>
     </div>
     <div class="tip-bar" v-if="stats && stats.detected === 0">
       {{ t('adsb.tip') }}
@@ -88,7 +92,7 @@ const rxLon = ref<number | undefined>(undefined)
 const selectedICAO = ref('')
 const geoLoading = ref(false)
 const geoError = ref('')
-const stats = ref<{ detected: number; valid: number; aircraft: number } | null>(null)
+const stats = ref<{ detected: number; valid: number; accepted: number; aircraft: number } | null>(null)
 let statsTimer: ReturnType<typeof setInterval> | null = null
 
 async function pollStats() {

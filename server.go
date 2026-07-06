@@ -900,10 +900,11 @@ func (s *Server) handleSetReceiverPosition(c echo.Context) error {
 
 // handleADSBStats returns ADS-B decoder statistics for debugging.
 func (s *Server) handleADSBStats(c echo.Context) error {
-	detected, valid, aircraftCount := s.receiver.GetADSBStats()
+	detected, valid, accepted, aircraftCount := s.receiver.GetADSBStats()
 	return c.JSON(http.StatusOK, map[string]int{
 		"detected": detected,
 		"valid":    valid,
+		"accepted": accepted,
 		"aircraft": aircraftCount,
 	})
 }

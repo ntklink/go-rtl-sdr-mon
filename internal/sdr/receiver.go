@@ -760,10 +760,10 @@ func (r *Receiver) reconfigureSampleRate(newRate uint32) error {
 }
 
 // GetADSBStats returns ADS-B decoder statistics.
-func (r *Receiver) GetADSBStats() (detected, valid, aircraftCount int) {
+func (r *Receiver) GetADSBStats() (detected, valid, accepted, aircraftCount int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	detected, valid = r.adsbDecoder.Stats()
+	detected, valid, accepted = r.adsbDecoder.Stats()
 	aircraftCount = r.adsbTracker.Count()
 	return
 }

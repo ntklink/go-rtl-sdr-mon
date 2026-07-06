@@ -210,7 +210,12 @@ export function useWaterfall() {
     if (reconnectTimer) clearTimeout(reconnectTimer)
     if (rafId) cancelAnimationFrame(rafId)
     clearInterval(binsInterval)
-    ws?.close()
+    if (ws) {
+      ws.onclose = null
+      ws.onerror = null
+      ws.close()
+      ws = null
+    }
   })
 
   return { fftSize, fftData, setCanvases, spectrumBins }
