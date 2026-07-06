@@ -4,6 +4,8 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 
 ![Overview](docs/image-overview.jpg)
 
+![ADS-B](docs/image-ads-b.jpg)
+
 ## Features
 
 - **RTL-SDR Support** — Built on [go-rtl-sdr](https://github.com/ntklink/go-rtl-sdr) CGO bindings; multi-device support via a pluggable `SDRDevice` interface
@@ -11,6 +13,8 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 - **Real-time Spectrum & Waterfall** — Canvas-rendered, streamed over WebSocket with configurable FFT size, rate, averaging, and max-hold
 - **Browser Audio Playback** — Demodulated PCM audio streamed over WebSocket, played with the Web Audio API
 - **12 Demodulation Modes** — OFF, Raw I/Q, AM, AM-Sync, LSB, USB, CW-L, CW-U, NFM, WFM, WFM-Stereo, WFM-OIRT (matching gqrx)
+- **ADS-B Reception** — Decode Mode S Extended Squitter (1090 MHz) messages: Manchester decoding, CRC verification with single-bit error correction, CPR (Compact Position Reporting) position decoding, aircraft tracking with callsign/altitude/speed/heading/vertical-rate extraction
+- **Live Aircraft Map** — Leaflet-based map showing nearby aircraft positions with locale-aware tile layers (OpenStreetMap / AutoNavi); auto-requests browser geolocation for receiver position
 - **Full DSP Chain** — DDC, FIR bandpass filtering, AGC with presets, anti-aliased audio resampling
 - **gqrx-compatible Parameters** — AGC presets (Off/Slow/Medium/Fast), filter presets (Wide/Normal/Narrow), filter shapes (Soft/Normal/Sharp), CW offset, WFM de-emphasis
 - **Internationalization** — English / Chinese UI with locale toggle
@@ -21,6 +25,7 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 ```
 RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canvas
                       └→ DDC → Bandpass Filter → Demod → AGC → Resampler → WebSocket → Web Audio API
+                      └→ ADS-B Decoder → Aircraft Tracker → WebSocket → Leaflet Map
 ```
 
 ### DSP Signal Chain
@@ -36,6 +41,11 @@ RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canv
 | AGC | `sdr/agc.go` | AGC with hang, gqrx-matched presets |
 | Resampler | `sdr/resampler.go` | Anti-aliased FIR + linear interpolation to 48 kHz |
 | Receiver | `sdr/receiver.go` | Top-level orchestration, per-client pub/sub for FFT & audio |
+| ADS-B Decoder | `adsb/decoder.go` | IQ → preamble detection → Manchester decoding → CRC verification |
+| ADS-B Messages | `adsb/message.go` | Callsign, altitude, airborne position, velocity extraction |
+| ADS-B CPR | `adsb/cpr.go` | Compact Position Reporting (global + relative) decoding |
+| ADS-B CRC | `adsb/crc.go` | Mode S 24-bit CRC with single-bit error correction |
+| ADS-B Tracker | `adsb/tracker.go` | Multi-aircraft tracking, ICAO-based state merging, CPR caching |
 
 ## Build
 
@@ -117,7 +127,9 @@ You can also trigger a release manually from the Actions tab (Workflow Dispatch)
 ./go-rtl-sdr-mon -autogain=false -gain 248  # 24.8 dB (gqrx default)
 ```
 
-Open `http://localhost:8080` in your browser.
+Open `https://localhost:8080` in your browser.
+
+> The server uses HTTPS by default (required for browser geolocation). A self-signed certificate (`cert.pem` / `key.pem`) is auto-generated in the binary's directory on first run. Accept the browser's security warning to proceed. Use `-tls=false` to disable.
 
 ### CLI Flags
 
@@ -127,6 +139,7 @@ Open `http://localhost:8080` in your browser.
 | `-samplerate` | `1800000` | Sample rate in Hz (gqrx default: 1.8 MHz) |
 | `-freq` | `102800000` | Center frequency in Hz (default: 102.8 MHz) |
 | `-port` | `8080` | HTTP server port |
+| `-tls` | `true` | Use HTTPS (auto-generates self-signed cert if needed) |
 | `-autogain` | `true` | Enable SDR auto gain |
 | `-gain` | `248` | Manual gain in 0.1 dB (248 = 24.8 dB, gqrx default) |
 | `-ppm` | `0` | Frequency correction in ppm |
@@ -159,6 +172,8 @@ Open `http://localhost:8080` in your browser.
 | POST | `/api/fft-size` | `{"size":8192}` | Set FFT size |
 | POST | `/api/fft-rate` | `{"rate":25}` | Set FFT refresh rate (fps) |
 | POST | `/api/fft-max-hold` | `{"enabled":true}` | Enable/disable max-hold |
+| POST | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR) |
+| GET | `/api/aircraft` | — | Current tracked aircraft list |
 
 ### WebSocket
 
@@ -167,6 +182,7 @@ Open `http://localhost:8080` in your browser.
 | `/api/ws/fft` | Binary: `4-byte size` → `float32[]` frames | FFT spectrum data |
 | `/api/ws/audio` | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples | Audio PCM |
 | `/api/ws/status` | JSON | Receiver status updates (500 ms interval) |
+| `/api/ws/aircraft` | JSON: `Aircraft[]` | ADS-B aircraft positions (broadcast every 10 blocks) |
 
 ## Project Structure
 
@@ -190,12 +206,21 @@ Open `http://localhost:8080` in your browser.
 │       ├── am.go            # AM envelope detector
 │       ├── amsync.go        # AM synchronous detector (PLL)
 │       └── ssb.go           # SSB
+├── adsb/
+│   ├── types.go             # Aircraft & Message structs
+│   ├── decoder.go           # IQ → ADS-B message detection pipeline
+│   ├── message.go           # Field extraction (callsign, altitude, etc.)
+│   ├── cpr.go               # Compact Position Reporting decoding
+│   ├── crc.go               # Mode S 24-bit CRC + error correction
+│   └── tracker.go           # Multi-aircraft tracking
 ├── web/                     # Vue 3 + Reka UI frontend
 │   ├── src/
-│   │   ├── App.vue          # Main layout (top bar + tabs + waterfall)
+│   │   ├── App.vue          # Main layout (top bar + tabs + waterfall/map)
 │   │   ├── components/      # Waterfall, FrequencyControl, ReceiverPanel,
-│   │   │                    # GainPanel, AudioPlayer, DeviceSelector
-│   │   ├── composables/     # useApi, useStatus, useWaterfall, useAudio, useI18n
+│   │   │                    # GainPanel, AudioPlayer, DeviceSelector,
+│   │   │                    # AircraftMap, AircraftPanel
+│   │   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
+│   │   │                    # useI18n, useAircraft, useDebounce
 │   │   └── styles/          # main.css, reka-ui.css
 │   └── dist/                # Build output (embedded via //go:embed)
 ├── bin/                     # Compiled binaries
