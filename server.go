@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/ntklink/go-rtl-sdr-mon/sdr"
+	"github.com/ntklink/go-rtl-sdr-mon/internal/sdr"
 )
 
 // --- Utility functions (migrated from console.go) ---
