@@ -495,6 +495,8 @@ var upgrader = websocket.Upgrader{
 }
 
 // handleWSFFT streams FFT spectrum data over WebSocket.
+// The ?bins= query parameter controls how many bins are sent (decimated by averaging).
+// Default is 1024 bins to reduce bandwidth.
 func (s *Server) handleWSFFT(c echo.Context) error {
 	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
@@ -505,11 +507,20 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 	fftCh := s.receiver.SubscribeFFT()
 	defer s.receiver.UnsubscribeFFT(fftCh)
 
-	// Send FFT size first
+	// Parse desired output bins from query parameter
+	bins := 1024 // default: decimate to 1024 bins
+	if b := c.QueryParam("bins"); b != "" {
+		if v := parseIntDefault(b, 0); v > 0 {
+			bins = v
+		}
+	}
+
+	// Send header: 4 bytes FFT size + 4 bytes output bins
 	size := s.receiver.GetSpectrumSize()
-	sizeBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(sizeBuf, uint32(size))
-	if err := ws.WriteMessage(websocket.BinaryMessage, sizeBuf); err != nil {
+	header := make([]byte, 8)
+	binary.LittleEndian.PutUint32(header[0:4], uint32(size))
+	binary.LittleEndian.PutUint32(header[4:8], uint32(bins))
+	if err := ws.WriteMessage(websocket.BinaryMessage, header); err != nil {
 		return nil
 	}
 
@@ -519,9 +530,10 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 			if !ok {
 				return nil
 			}
-			// Convert float32 slice to bytes
-			buf := make([]byte, len(data)*4)
-			for i, v := range data {
+			// Decimate if needed
+			out := decimateFFT(data, bins)
+			buf := make([]byte, len(out)*4)
+			for i, v := range out {
 				binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))
 			}
 			if err := ws.WriteMessage(websocket.BinaryMessage, buf); err != nil {
@@ -534,6 +546,60 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 			}
 		}
 	}
+}
+
+// decimateFFT reduces the number of FFT bins by averaging groups of bins.
+// If bins >= len(data), the original data is returned unchanged.
+func decimateFFT(data []float32, bins int) []float32 {
+	n := len(data)
+	if bins <= 0 || bins >= n {
+		return data
+	}
+	out := make([]float32, bins)
+	groupSize := float64(n) / float64(bins)
+	for i := 0; i < bins; i++ {
+		start := int(float64(i) * groupSize)
+		end := int(float64(i+1) * groupSize)
+		if end > n {
+			end = n
+		}
+		if start >= end {
+			start = end - 1
+			if start < 0 {
+				start = 0
+			}
+		}
+		var sum float64
+		count := 0
+		for j := start; j < end; j++ {
+			sum += float64(data[j])
+			count++
+		}
+		if count > 0 {
+			out[i] = float32(sum / float64(count))
+		}
+	}
+	return out
+}
+
+// parseIntDefault parses an integer string, returning the default on error.
+func parseIntDefault(s string, def int) int {
+	v := 0
+	neg := false
+	for i, c := range s {
+		if i == 0 && c == '-' {
+			neg = true
+			continue
+		}
+		if c < '0' || c > '9' {
+			return def
+		}
+		v = v*10 + int(c-'0')
+	}
+	if neg {
+		v = -v
+	}
+	return v
 }
 
 // handleWSAudio streams audio PCM data over WebSocket.

@@ -1,5 +1,9 @@
 import { ref, onUnmounted } from 'vue'
 
+// Shared spectrum bins setting (number of bins sent over WebSocket)
+// Default 1024 to reduce bandwidth; 0 = full FFT data
+const spectrumBins = ref(1024)
+
 export function useWaterfall() {
   const fftSize = ref(2048)
   const fftData = ref<Float32Array | null>(null)
@@ -135,20 +139,22 @@ export function useWaterfall() {
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    ws = new WebSocket(`${proto}//${location.host}/api/ws/fft`)
+    const bins = spectrumBins.value
+    const binsParam = bins > 0 ? `?bins=${bins}` : ''
+    ws = new WebSocket(`${proto}//${location.host}/api/ws/fft${binsParam}`)
     ws.binaryType = 'arraybuffer'
 
-    let sizeReceived = false
+    let headerReceived = false
 
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') return
 
       const buf = new DataView(ev.data as ArrayBuffer)
 
-      if (!sizeReceived) {
-        // First message: 4 bytes = FFT size
+      if (!headerReceived) {
+        // First message: 4 bytes FFT size + 4 bytes output bins
         fftSize.value = buf.getUint32(0, true)
-        sizeReceived = true
+        headerReceived = true
         return
       }
 
@@ -169,14 +175,39 @@ export function useWaterfall() {
     }
   }
 
+  // Reconnect when spectrum bins changes
+  function onBinsChange() {
+    if (ws) {
+      ws.onclose = null
+      ws.close()
+      ws = null
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    connect()
+  }
+
+  // Watch for bins changes
+  let prevBins = spectrumBins.value
+  const checkBins = () => {
+    if (spectrumBins.value !== prevBins) {
+      prevBins = spectrumBins.value
+      onBinsChange()
+    }
+  }
+  const binsInterval = setInterval(checkBins, 200)
+
   connect()
   draw()
 
   onUnmounted(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer)
     if (rafId) cancelAnimationFrame(rafId)
+    clearInterval(binsInterval)
     ws?.close()
   })
 
-  return { fftSize, fftData, setCanvases }
+  return { fftSize, fftData, setCanvases, spectrumBins }
 }

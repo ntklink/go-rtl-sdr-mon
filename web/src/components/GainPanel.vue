@@ -102,6 +102,23 @@
     </div>
 
     <div class="control-group">
+      <label>{{ t('gain.spectrumBins') }}</label>
+      <SelectRoot v-model="spectrumBinsStr" @update:model-value="onSpectrumBinsChange">
+        <SelectTrigger class="reka-select-trigger">
+          <span class="select-display">{{ spectrumBinsStr === '0' ? t('gain.spectrumFull') : spectrumBinsStr }}</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </SelectTrigger>
+        <SelectPortal>
+          <SelectContent class="reka-select-content" position="popper" :side-offset="4">
+            <SelectItem v-for="b in spectrumBinsOptions" :key="b" :value="String(b)" class="reka-select-item">{{ b === 0 ? t('gain.spectrumFull') : b }}</SelectItem>
+          </SelectContent>
+        </SelectPortal>
+      </SelectRoot>
+    </div>
+
+    <div class="control-group">
       <label>{{ t('gain.fftRate') }}</label>
       <div class="slider-row">
         <SliderRoot
@@ -140,10 +157,12 @@ import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, Sele
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
 import { useStatus } from '../composables/useStatus'
+import { useWaterfall } from '../composables/useWaterfall'
 
 const api = useApi()
 const { t } = useI18n()
 const { status, statusLoaded } = useStatus()
+const { spectrumBins } = useWaterfall()
 
 const autoGain = ref(true)
 const gainIndex = ref(0)
@@ -155,6 +174,8 @@ const fftSizes = [1024, 2048, 4096, 8192, 16384]
 const fftSizeStr = ref('8192')
 const fftRate = ref(25)
 const fftMaxHold = ref(false)
+const spectrumBinsOptions = [0, 256, 512, 1024, 2048, 4096]
+const spectrumBinsStr = ref(String(spectrumBins.value))
 
 // One-time sync from backend status (on page load / reconnect)
 let synced = false
@@ -266,6 +287,10 @@ async function onFFTSizeChange() {
   } catch (e) {
     console.error('Set FFT size failed:', e)
   }
+}
+
+function onSpectrumBinsChange() {
+  spectrumBins.value = parseInt(spectrumBinsStr.value)
 }
 
 async function onFFTRateChange() {

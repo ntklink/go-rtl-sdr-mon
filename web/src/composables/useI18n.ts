@@ -39,6 +39,8 @@ const messages: Record<string, Record<string, string>> = {
     'gain.fftSize': 'FFT 大小',
     'gain.fftRate': 'FFT 刷新率 (fps)',
     'gain.fftMaxHold': 'FFT Max-Hold',
+    'gain.spectrumBins': '频谱点数',
+    'gain.spectrumFull': '全量',
 
     // Audio panel
     'audio.title': '音频',
@@ -89,6 +91,8 @@ const messages: Record<string, Record<string, string>> = {
     'gain.fftSize': 'FFT Size',
     'gain.fftRate': 'FFT Rate (fps)',
     'gain.fftMaxHold': 'FFT Max-Hold',
+    'gain.spectrumBins': 'Spectrum Bins',
+    'gain.spectrumFull': 'Full',
 
     'audio.title': 'Audio',
     'audio.play': '▶ Play',
