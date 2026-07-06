@@ -111,6 +111,14 @@
   box-shadow: 0 0 0 2px #0066cc;
 }
 
+.reka-slider-root[data-disabled] {
+  opacity: 0.4;
+}
+
+.reka-slider-root[data-disabled] .reka-slider-thumb {
+  cursor: not-allowed;
+}
+
 /* Switch */
 .reka-switch-root {
   width: 36px;

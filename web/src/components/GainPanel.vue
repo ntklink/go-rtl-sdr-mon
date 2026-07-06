@@ -31,7 +31,7 @@
       </SelectRoot>
     </div>
 
-    <div v-if="!autoGain" class="control-group">
+    <div v-show="!autoGain" class="control-group">
       <label>{{ t('gain.manual') }}</label>
       <div class="slider-row">
         <SliderRoot
@@ -39,6 +39,7 @@
           :min="0"
           :max="Math.max(0, gains.length - 1)"
           :step="1"
+          :disabled="gains.length === 0"
           class="reka-slider-root"
           @update:model-value="onGainChange"
         >
@@ -233,7 +234,7 @@ const fftRateSlider = computed({
 onMounted(async () => {
   try {
     const info = await api.getDeviceInfo()
-    gains.value = info.Gains || []
+    gains.value = info.gains || []
   } catch (e) {
     console.error('Get device info failed:', e)
   }
