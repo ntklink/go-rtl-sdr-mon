@@ -22,11 +22,12 @@ const DEFAULT_CENTER: L.LatLngExpression = [0, 160]
 const DEFAULT_ZOOM = 2
 
 function createTileLayer(): L.TileLayer {
-  return L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
-    subdomains: ['a', 'b', 'c', 'd'],
-    attribution: '© OpenStreetMap contributors © CARTO',
+  return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    subdomains: ['a', 'b', 'c'],
+    attribution: '© OpenStreetMap contributors',
     maxZoom: 18,
     keepBuffer: 4,
+    crossOrigin: true,
     errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
   })
 }
@@ -165,9 +166,9 @@ onUnmounted(() => {
   background: #1a1a2e;
 }
 
-/* Brighten the dark tiles */
+/* Convert light OSM tiles to dark theme via CSS filter */
 :deep(.leaflet-tile-pane) {
-  filter: brightness(1.55) saturate(1.2);
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.8);
 }
 
 :deep(.leaflet-control-zoom a) {
