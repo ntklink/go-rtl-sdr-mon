@@ -3,24 +3,14 @@
     <h3>{{ t('audio.title') }}</h3>
 
     <div class="audio-controls">
-      <button
-        class="play-btn"
-        :class="{ playing: isPlaying }"
-        @click="togglePlay"
-      >
+      <button class="play-btn" :class="{ playing: isPlaying }" @click="togglePlay">
         {{ isPlaying ? t('audio.stop') : t('audio.play') }}
       </button>
 
       <div class="volume-control">
         <label>{{ t('audio.volume') }}</label>
-        <SliderRoot
-          :model-value="[volume]"
-          @update:model-value="onVolumeChange"
-          :min="0"
-          :max="1"
-          :step="0.01"
-          class="reka-slider-root"
-        >
+        <SliderRoot :model-value="[volume]" @update:model-value="onVolumeChange" :min="0" :max="1" :step="0.01"
+          class="reka-slider-root">
           <SliderTrack class="reka-slider-track">
             <SliderRange class="reka-slider-range" />
           </SliderTrack>
@@ -55,7 +45,7 @@ function togglePlay() {
   }
 }
 
-function onVolumeChange(val: number[]) {
+function onVolumeChange(val: number[] | undefined) {
   if (val && val.length > 0) {
     setVolume(val[0])
   }

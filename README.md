@@ -32,23 +32,23 @@ RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canv
 
 ### DSP Signal Chain
 
-| Stage | File | Description |
-|-------|------|-------------|
-| Source | `internal/sdr/source.go` | RTL-SDR async read, 8-bit IQ → complex128 |
-| Device Abstraction | `internal/sdr/device.go` | `SDRDevice` interface, `DeviceManager` for enumeration & hot-swap |
-| FFT | `internal/sdr/fft.go` | Custom radix-2 Cooley-Tukey FFT, Hann window, max-hold with decay |
-| DDC | `internal/sdr/ddc.go` | Digital down-converter (NCO + FIR low-pass + decimation) |
-| Filter | `internal/sdr/filter.go` | Windowed-sinc FIR design (low-pass / band-pass / complex band-pass) |
-| Demodulator | `internal/demod/` | FM, WFM (mono/stereo/OIRT), AM, AM-Sync (PLL), SSB |
-| AGC | `internal/sdr/agc.go` | AGC with hang, gqrx-matched presets |
-| Resampler | `internal/sdr/resampler.go` | Anti-aliased FIR + linear interpolation to 48 kHz |
-| Receiver | `internal/sdr/receiver.go` | Top-level orchestration, per-client pub/sub for FFT & audio, source hot-swap |
-| ADS-B Decoder | `internal/adsb/decoder.go` | IQ → preamble detection → Manchester decoding → CRC verification |
-| ADS-B Messages | `internal/adsb/message.go` | Callsign, altitude, airborne position, velocity extraction |
-| ADS-B CPR | `internal/adsb/cpr.go` | Compact Position Reporting (global + relative) decoding |
-| ADS-B CRC | `internal/adsb/crc.go` | Mode S 24-bit CRC with single-bit error correction |
-| ADS-B Tracker | `internal/adsb/tracker.go` | Multi-aircraft tracking, ICAO-based state merging, CPR caching |
-| NOAA APT | `internal/noaa/apt.go` | 2.4 kHz subcarrier AM demod, sync detection, image assembly |
+| Stage              | File                        | Description                                                                  |
+| ------------------ | --------------------------- | ---------------------------------------------------------------------------- |
+| Source             | `internal/sdr/source.go`    | RTL-SDR async read, 8-bit IQ → complex128                                    |
+| Device Abstraction | `internal/sdr/device.go`    | `SDRDevice` interface, `DeviceManager` for enumeration & hot-swap            |
+| FFT                | `internal/sdr/fft.go`       | Custom radix-2 Cooley-Tukey FFT, Hann window, max-hold with decay            |
+| DDC                | `internal/sdr/ddc.go`       | Digital down-converter (NCO + FIR low-pass + decimation)                     |
+| Filter             | `internal/sdr/filter.go`    | Windowed-sinc FIR design (low-pass / band-pass / complex band-pass)          |
+| Demodulator        | `internal/demod/`           | FM, WFM (mono/stereo/OIRT), AM, AM-Sync (PLL), SSB                           |
+| AGC                | `internal/sdr/agc.go`       | AGC with hang, gqrx-matched presets                                          |
+| Resampler          | `internal/sdr/resampler.go` | Anti-aliased FIR + linear interpolation to 48 kHz                            |
+| Receiver           | `internal/sdr/receiver.go`  | Top-level orchestration, per-client pub/sub for FFT & audio, source hot-swap |
+| ADS-B Decoder      | `internal/adsb/decoder.go`  | IQ → preamble detection → Manchester decoding → CRC verification             |
+| ADS-B Messages     | `internal/adsb/message.go`  | Callsign, altitude, airborne position, velocity extraction                   |
+| ADS-B CPR          | `internal/adsb/cpr.go`      | Compact Position Reporting (global + relative) decoding                      |
+| ADS-B CRC          | `internal/adsb/crc.go`      | Mode S 24-bit CRC with single-bit error correction                           |
+| ADS-B Tracker      | `internal/adsb/tracker.go`  | Multi-aircraft tracking, ICAO-based state merging, CPR caching               |
+| NOAA APT           | `internal/noaa/apt.go`      | 2.4 kHz subcarrier AM demod, sync detection, image assembly                  |
 
 ## Build
 
@@ -119,60 +119,60 @@ Open `https://localhost:8080` in your browser.
 
 ### CLI Flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-device` | `0` | RTL-SDR device index |
-| `-samplerate` | `1800000` | Sample rate in Hz (gqrx default: 1.8 MHz) |
-| `-freq` | `102800000` | Center frequency in Hz (default: 102.8 MHz) |
-| `-port` | `8080` | HTTP server port |
-| `-tls` | `true` | Use HTTPS (auto-generates self-signed cert if needed) |
-| `-autogain` | `true` | Enable SDR auto gain |
-| `-gain` | `248` | Manual gain in 0.1 dB (248 = 24.8 dB, gqrx default) |
-| `-ppm` | `0` | Frequency correction in ppm |
+| Flag          | Default     | Description                                           |
+| ------------- | ----------- | ----------------------------------------------------- |
+| `-device`     | `0`         | RTL-SDR device index                                  |
+| `-samplerate` | `1800000`   | Sample rate in Hz (gqrx default: 1.8 MHz)             |
+| `-freq`       | `102800000` | Center frequency in Hz (default: 102.8 MHz)           |
+| `-port`       | `8080`      | HTTP server port                                      |
+| `-tls`        | `true`      | Use HTTPS (auto-generates self-signed cert if needed) |
+| `-autogain`   | `true`      | Enable SDR auto gain                                  |
+| `-gain`       | `248`       | Manual gain in 0.1 dB (248 = 24.8 dB, gqrx default)   |
+| `-ppm`        | `0`         | Frequency correction in ppm                           |
 
 ## API Reference
 
 ### REST
 
-| Method | Endpoint | Body | Description |
-|--------|----------|------|-------------|
-| GET | `/api/device` | — | Active device info |
-| GET | `/api/devices` | — | List available devices |
-| POST | `/api/device/select` | `{"id":"..."}` | Select / open a device |
-| GET | `/api/status` | — | Receiver status & config |
-| GET | `/api/demods` | — | Available demodulator list |
-| POST | `/api/frequency` | `{"frequency":100000000}` | Set center frequency |
-| POST | `/api/demod` | `{"demod":"NFM"}` | Set demodulator |
-| POST | `/api/filter` | `{"low":-5000,"high":5000}` | Set filter cutoffs |
-| POST | `/api/filter-offset` | `{"offset":0}` | Set filter offset |
-| POST | `/api/filter-shape` | `{"shape":"normal"}` | Set filter shape (soft/normal/sharp) |
-| POST | `/api/filter-preset` | `{"preset":"normal"}` | Set filter preset (wide/normal/narrow) |
-| POST | `/api/squelch` | `{"level":-80}` | Set squelch level (dBFS) |
-| POST | `/api/agc` | `{"enabled":true}` | Enable/disable AGC |
-| POST | `/api/agc-preset` | `{"preset":"medium"}` | Set AGC preset (off/slow/medium/fast) |
-| POST | `/api/gain` | `{"gain":248}` | Set manual gain (0.1 dB) |
-| POST | `/api/auto-gain` | `{"auto":true}` | Enable/disable SDR auto gain |
-| POST | `/api/freq-correction` | `{"ppm":1}` | Set frequency correction |
-| POST | `/api/cw-offset` | `{"offset":700}` | Set CW/BFO offset (Hz) |
-| POST | `/api/spectrum-avg` | `{"avg":0.3}` | Set FFT averaging factor |
-| POST | `/api/fft-size` | `{"size":8192}` | Set FFT size |
-| POST | `/api/fft-rate` | `{"rate":25}` | Set FFT refresh rate (fps) |
-| POST | `/api/fft-max-hold` | `{"enabled":true}` | Enable/disable max-hold |
-| POST | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR) |
-| GET | `/api/aircraft` | — | Current tracked aircraft list |
-| GET | `/api/noaa/satellites` | — | List of NOAA APT satellites |
-| GET | `/api/apt-stats` | — | APT decoder statistics |
-| POST | `/api/apt-reset` | `{}` | Clear APT image buffer |
+| Method | Endpoint                 | Body                                  | Description                            |
+| ------ | ------------------------ | ------------------------------------- | -------------------------------------- |
+| GET    | `/api/device`            | —                                     | Active device info                     |
+| GET    | `/api/devices`           | —                                     | List available devices                 |
+| POST   | `/api/device/select`     | `{"id":"..."}`                        | Select / open a device                 |
+| GET    | `/api/status`            | —                                     | Receiver status & config               |
+| GET    | `/api/demods`            | —                                     | Available demodulator list             |
+| POST   | `/api/frequency`         | `{"frequency":100000000}`             | Set center frequency                   |
+| POST   | `/api/demod`             | `{"demod":"NFM"}`                     | Set demodulator                        |
+| POST   | `/api/filter`            | `{"low":-5000,"high":5000}`           | Set filter cutoffs                     |
+| POST   | `/api/filter-offset`     | `{"offset":0}`                        | Set filter offset                      |
+| POST   | `/api/filter-shape`      | `{"shape":"normal"}`                  | Set filter shape (soft/normal/sharp)   |
+| POST   | `/api/filter-preset`     | `{"preset":"normal"}`                 | Set filter preset (wide/normal/narrow) |
+| POST   | `/api/squelch`           | `{"level":-80}`                       | Set squelch level (dBFS)               |
+| POST   | `/api/agc`               | `{"enabled":true}`                    | Enable/disable AGC                     |
+| POST   | `/api/agc-preset`        | `{"preset":"medium"}`                 | Set AGC preset (off/slow/medium/fast)  |
+| POST   | `/api/gain`              | `{"gain":248}`                        | Set manual gain (0.1 dB)               |
+| POST   | `/api/auto-gain`         | `{"auto":true}`                       | Enable/disable SDR auto gain           |
+| POST   | `/api/freq-correction`   | `{"ppm":1}`                           | Set frequency correction               |
+| POST   | `/api/cw-offset`         | `{"offset":700}`                      | Set CW/BFO offset (Hz)                 |
+| POST   | `/api/spectrum-avg`      | `{"avg":0.3}`                         | Set FFT averaging factor               |
+| POST   | `/api/fft-size`          | `{"size":8192}`                       | Set FFT size                           |
+| POST   | `/api/fft-rate`          | `{"rate":25}`                         | Set FFT refresh rate (fps)             |
+| POST   | `/api/fft-max-hold`      | `{"enabled":true}`                    | Enable/disable max-hold                |
+| POST   | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR)  |
+| GET    | `/api/aircraft`          | —                                     | Current tracked aircraft list          |
+| GET    | `/api/noaa/satellites`   | —                                     | List of NOAA APT satellites            |
+| GET    | `/api/apt-stats`         | —                                     | APT decoder statistics                 |
+| POST   | `/api/apt-reset`         | `{}`                                  | Clear APT image buffer                 |
 
 ### WebSocket
 
-| Endpoint | Format | Description |
-|----------|--------|-------------|
-| `/api/ws/fft` | Binary: `4-byte size` → `float32[]` frames | FFT spectrum data |
-| `/api/ws/audio` | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples | Audio PCM |
-| `/api/ws/status` | JSON | Receiver status updates (500 ms interval) |
-| `/api/ws/aircraft` | JSON: `Aircraft[]` | ADS-B aircraft positions (broadcast every 10 blocks) |
-| `/api/ws/apt` | Binary: `4-byte lineNum` + `2080-byte pixels` | NOAA APT image lines |
+| Endpoint           | Format                                                         | Description                                          |
+| ------------------ | -------------------------------------------------------------- | ---------------------------------------------------- |
+| `/api/ws/fft`      | Binary: `4-byte size` → `float32[]` frames                     | FFT spectrum data                                    |
+| `/api/ws/audio`    | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples | Audio PCM                                            |
+| `/api/ws/status`   | JSON                                                           | Receiver status updates (500 ms interval)            |
+| `/api/ws/aircraft` | JSON: `Aircraft[]`                                             | ADS-B aircraft positions (broadcast every 10 blocks) |
+| `/api/ws/apt`      | Binary: `4-byte lineNum` + `2080-byte pixels`                  | NOAA APT image lines                                 |
 
 ## Project Structure
 

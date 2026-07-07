@@ -4,10 +4,7 @@
     <div class="top-bar">
       <div class="top-left">
         <DeviceSelector />
-        <FrequencyControl
-          :frequency="status.CenterFreq"
-          @update:frequency="setFrequency"
-        />
+        <FrequencyControl :frequency="status.CenterFreq" @update:frequency="setFrequency" />
       </div>
       <div class="top-right">
         <div class="status-bar">
@@ -31,14 +28,8 @@
     <!-- Main area: Waterfall + tabbed side panels -->
     <div class="main-area">
       <div class="center-area">
-        <Waterfall
-          v-if="!isADSB"
-          :center-freq="status.CenterFreq"
-          :sample-rate="status.SampleRate"
-          :filter-low="status.FilterLow"
-          :filter-high="status.FilterHigh"
-          @update:filter="setFilter"
-        />
+        <Waterfall v-if="!isADSB" :center-freq="status.CenterFreq" :sample-rate="status.SampleRate"
+          :filter-low="status.FilterLow" :filter-high="status.FilterHigh" @update:filter="setFilter" />
         <AircraftMap v-else />
       </div>
       <div class="side-panels">
@@ -51,13 +42,8 @@
             <TabsTrigger value="noaa" class="reka-tabs-trigger">{{ t('noaa.tab') }}</TabsTrigger>
           </TabsList>
           <TabsContent value="receiver" force-mount class="reka-tabs-content">
-            <ReceiverPanel
-              :demod="status.Demod"
-              :filter-low="status.FilterLow"
-              :filter-high="status.FilterHigh"
-              @update:demod="setDemod"
-              @update:filter="setFilter"
-            />
+            <ReceiverPanel :demod="status.Demod" :filter-low="status.FilterLow" :filter-high="status.FilterHigh"
+              @update:demod="setDemod" @update:filter="setFilter" />
           </TabsContent>
           <TabsContent value="gain" force-mount class="reka-tabs-content">
             <GainPanel />

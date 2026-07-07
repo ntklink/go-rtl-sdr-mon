@@ -23,24 +23,12 @@
 
     <div class="control-group">
       <label>{{ t('rx.filterLow') }}</label>
-      <input
-        type="number"
-        :value="filterLow"
-        @change="onFilterLowChange"
-        class="input"
-        step="100"
-      />
+      <input type="number" :value="filterLow" @change="onFilterLowChange" class="input" step="100" />
     </div>
 
     <div class="control-group">
       <label>{{ t('rx.filterHigh') }}</label>
-      <input
-        type="number"
-        :value="filterHigh"
-        @change="onFilterHighChange"
-        class="input"
-        step="100"
-      />
+      <input type="number" :value="filterHigh" @change="onFilterHighChange" class="input" step="100" />
     </div>
 
     <div class="control-group">
@@ -74,20 +62,15 @@
     <div class="control-group">
       <label>{{ t('rx.squelch') }}</label>
       <div class="slider-row">
-        <SliderRoot
-          v-model="squelchSlider"
-          :min="-150"
-          :max="0"
-          :step="1"
-          class="reka-slider-root"
-          @update:model-value="onSquelchChange"
-        >
+        <SliderRoot v-model="squelchSlider" :min="-150" :max="0" :step="1" class="reka-slider-root"
+          @update:model-value="onSquelchChange">
           <SliderTrack class="reka-slider-track">
             <SliderRange class="reka-slider-range" />
           </SliderTrack>
           <SliderThumb class="reka-slider-thumb" />
         </SliderRoot>
-        <span class="value-display">{{ squelchLevel === -150 ? t('rx.squelchOff') : squelchLevel.toFixed(0) + ' dB' }}</span>
+        <span class="value-display">{{ squelchLevel === -150 ? t('rx.squelchOff') : squelchLevel.toFixed(0) + ' dB'
+          }}</span>
       </div>
     </div>
   </div>

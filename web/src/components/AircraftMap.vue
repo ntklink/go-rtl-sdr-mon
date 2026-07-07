@@ -173,13 +173,16 @@ onUnmounted(() => {
   color: #ccc !important;
   border-color: #444 !important;
 }
+
 :deep(.leaflet-control-zoom a:hover) {
   background: #3a3a4e !important;
 }
+
 :deep(.leaflet-control-attribution) {
   background: rgba(26, 26, 46, 0.8) !important;
   color: #666 !important;
 }
+
 :deep(.leaflet-control-attribution a) {
   color: #888 !important;
 }

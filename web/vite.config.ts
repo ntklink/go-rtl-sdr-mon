@@ -1,6 +1,12 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+declare const process: {
+  env: {
+    VITE_DEV_API_TARGET?: string
+  }
+}
+
 // Dev backend target. Override with VITE_DEV_API_TARGET if the backend runs
 // on another host (e.g. `VITE_DEV_API_TARGET=http://192.168.1.10:8080 npm run dev`).
 const devApiTarget = process.env.VITE_DEV_API_TARGET || 'http://localhost:8080'

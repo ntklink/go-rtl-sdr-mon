@@ -2,12 +2,8 @@
   <div class="waterfall-container" ref="containerRef">
     <!-- Frequency axis -->
     <div class="freq-axis" ref="freqAxis">
-      <span
-        v-for="(tick, i) in freqTicks"
-        :key="tick.freq"
-        :class="{ 'tick-left': i === 0, 'tick-right': i === freqTicks.length - 1 }"
-        :style="{ left: tick.pos + '%' }"
-      >
+      <span v-for="(tick, i) in freqTicks" :key="tick.freq"
+        :class="{ 'tick-left': i === 0, 'tick-right': i === freqTicks.length - 1 }" :style="{ left: tick.pos + '%' }">
         {{ tick.label }}
       </span>
     </div>

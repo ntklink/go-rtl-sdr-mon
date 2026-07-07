@@ -9,12 +9,7 @@
       </SelectTrigger>
       <SelectPortal>
         <SelectContent class="reka-select-content" position="popper" :side-offset="4">
-          <SelectItem
-            v-for="d in devices"
-            :key="d.id"
-            :value="d.id"
-            class="reka-select-item device-option"
-          >
+          <SelectItem v-for="d in devices" :key="d.id" :value="d.id" class="reka-select-item device-option">
             <span class="device-label">
               <span class="device-name">{{ d.name || d.product || d.id }}</span>
               <span v-if="d.active" class="device-badge active">●</span>

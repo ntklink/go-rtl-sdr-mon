@@ -5,13 +5,7 @@
       <span class="freq-unit">{{ freqUnit }}</span>
     </div>
     <div class="freq-input-group">
-      <input
-        v-model="inputFreq"
-        type="number"
-        class="freq-input"
-        placeholder="Hz"
-        @keyup.enter="applyFreq"
-      />
+      <input v-model="inputFreq" type="number" class="freq-input" placeholder="Hz" @keyup.enter="applyFreq" />
       <SelectRoot v-model="freqUnitSelect">
         <SelectTrigger class="freq-unit-trigger reka-select-trigger">
           <span class="select-display">{{ freqUnitSelect }}</span>

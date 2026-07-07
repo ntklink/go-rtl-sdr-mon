@@ -6,13 +6,8 @@
     <div class="control-group">
       <label>{{ t('noaa.satellite') }}</label>
       <div class="sat-buttons">
-        <button
-          v-for="sat in satellites"
-          :key="sat.name"
-          class="sat-btn"
-          :class="{ active: isActive(sat) }"
-          @click="selectSatellite(sat)"
-        >
+        <button v-for="sat in satellites" :key="sat.name" class="sat-btn" :class="{ active: isActive(sat) }"
+          @click="selectSatellite(sat)">
           {{ sat.name }}
           <span class="sat-freq">{{ (sat.frequency / 1e6).toFixed(4) }} MHz</span>
         </button>
@@ -40,12 +35,7 @@
       <div v-if="lines.length === 0" class="no-data">
         {{ t('noaa.noImage') }}
       </div>
-      <canvas
-        v-else
-        ref="canvasRef"
-        :width="APT_LINE_WIDTH"
-        class="apt-canvas"
-      ></canvas>
+      <canvas v-else ref="canvasRef" :width="APT_LINE_WIDTH" class="apt-canvas"></canvas>
     </div>
 
     <!-- Controls -->

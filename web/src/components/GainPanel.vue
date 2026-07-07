@@ -34,15 +34,8 @@
     <div v-show="!autoGain" class="control-group">
       <label>{{ t('gain.manual') }}</label>
       <div class="slider-row">
-        <SliderRoot
-          v-model="gainSlider"
-          :min="0"
-          :max="Math.max(0, gains.length - 1)"
-          :step="1"
-          :disabled="gains.length === 0"
-          class="reka-slider-root"
-          @update:model-value="onGainChange"
-        >
+        <SliderRoot v-model="gainSlider" :min="0" :max="Math.max(0, gains.length - 1)" :step="1"
+          :disabled="gains.length === 0" class="reka-slider-root" @update:model-value="onGainChange">
           <SliderTrack class="reka-slider-track">
             <SliderRange class="reka-slider-range" />
           </SliderTrack>
@@ -56,26 +49,14 @@
 
     <div class="control-group">
       <label>{{ t('gain.ppm') }}</label>
-      <input
-        type="number"
-        v-model.number="ppm"
-        class="input"
-        step="1"
-        @change="onPpmChange"
-      />
+      <input type="number" v-model.number="ppm" class="input" step="1" @change="onPpmChange" />
     </div>
 
     <div class="control-group">
       <label>{{ t('gain.fftAvg') }}</label>
       <div class="slider-row">
-        <SliderRoot
-          v-model="avgSlider"
-          :min="0"
-          :max="0.95"
-          :step="0.05"
-          class="reka-slider-root"
-          @update:model-value="onAvgChange"
-        >
+        <SliderRoot v-model="avgSlider" :min="0" :max="0.95" :step="0.05" class="reka-slider-root"
+          @update:model-value="onAvgChange">
           <SliderTrack class="reka-slider-track">
             <SliderRange class="reka-slider-range" />
           </SliderTrack>
@@ -113,7 +94,8 @@
         </SelectTrigger>
         <SelectPortal>
           <SelectContent class="reka-select-content" position="popper" :side-offset="4">
-            <SelectItem v-for="b in spectrumBinsOptions" :key="b" :value="String(b)" class="reka-select-item">{{ b === 0 ? t('gain.spectrumFull') : b }}</SelectItem>
+            <SelectItem v-for="b in spectrumBinsOptions" :key="b" :value="String(b)" class="reka-select-item">{{ b === 0
+              ? t('gain.spectrumFull') : b }}</SelectItem>
           </SelectContent>
         </SelectPortal>
       </SelectRoot>
@@ -122,14 +104,8 @@
     <div class="control-group">
       <label>{{ t('gain.fftRate') }}</label>
       <div class="slider-row">
-        <SliderRoot
-          v-model="fftRateSlider"
-          :min="1"
-          :max="60"
-          :step="1"
-          class="reka-slider-root"
-          @update:model-value="onFFTRateChange"
-        >
+        <SliderRoot v-model="fftRateSlider" :min="1" :max="60" :step="1" class="reka-slider-root"
+          @update:model-value="onFFTRateChange">
           <SliderTrack class="reka-slider-track">
             <SliderRange class="reka-slider-range" />
           </SliderTrack>

@@ -23,20 +23,10 @@
     <div class="control-group">
       <label>{{ t('adsb.rxPos') }}</label>
       <div class="rx-pos-row">
-        <input
-          type="number"
-          v-model.number="rxLat"
-          class="input rx-input"
-          :placeholder="t('adsb.lat')"
-          step="0.00001"
-        />
-        <input
-          type="number"
-          v-model.number="rxLon"
-          class="input rx-input"
-          :placeholder="t('adsb.lon')"
-          step="0.00001"
-        />
+        <input type="number" v-model.number="rxLat" class="input rx-input" :placeholder="t('adsb.lat')"
+          step="0.00001" />
+        <input type="number" v-model.number="rxLon" class="input rx-input" :placeholder="t('adsb.lon')"
+          step="0.00001" />
         <button class="btn-geo" @click="requestGeolocation" :disabled="geoLoading" :title="t('adsb.geoLocate')">
           {{ geoLoading ? '…' : '📍' }}
         </button>
@@ -56,13 +46,8 @@
         <span class="col-spd">{{ t('adsb.speed') }}</span>
         <span class="col-trk">{{ t('adsb.track') }}</span>
       </div>
-      <div
-        v-for="ac in sortedAircraft"
-        :key="ac.icao"
-        class="table-row"
-        :class="{ selected: selectedICAO === ac.icao }"
-        @click="selectAircraft(ac)"
-      >
+      <div v-for="ac in sortedAircraft" :key="ac.icao" class="table-row" :class="{ selected: selectedICAO === ac.icao }"
+        @click="selectAircraft(ac)">
         <span class="col-callsign">
           <span class="callsign-text">{{ ac.callsign || '----' }}</span>
           <span class="icao-text">{{ ac.icao }}</span>
