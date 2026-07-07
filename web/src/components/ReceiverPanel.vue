@@ -146,16 +146,14 @@ const squelchSlider = computed({
 
 async function onFilterLowChange(e: Event) {
   const val = parseInt((e.target as HTMLInputElement).value)
+  if (isNaN(val)) return
   emit('update:filter', val, props.filterHigh)
 }
 
 async function onFilterHighChange(e: Event) {
   const val = parseInt((e.target as HTMLInputElement).value)
+  if (isNaN(val)) return
   emit('update:filter', props.filterLow, val)
-}
-
-function setFilterPreset(low: number, high: number) {
-  emit('update:filter', low, high)
 }
 
 async function onFilterPreset(preset: string) {

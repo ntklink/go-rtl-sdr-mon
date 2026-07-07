@@ -28,8 +28,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useWaterfall } from '../composables/useWaterfall'
+import { debounce } from '../composables/useDebounce'
 
 const props = defineProps<{
   centerFreq: number
@@ -50,6 +51,12 @@ const spectrumHeight = ref(200)
 const waterfallHeight = ref(300)
 
 const { setCanvases, fftSize } = useWaterfall()
+
+// Debounced filter emission so dragging an edge doesn't flood the backend
+// with one POST /api/filter per mousemove event.
+const emitFilter = debounce((low: number, high: number) => {
+  emit('update:filter', low, high)
+}, 40)
 
 // --- Filter drag logic ---
 type DragMode = 'none' | 'left' | 'right' | 'center'
@@ -103,18 +110,17 @@ function onMouseMove(e: MouseEvent) {
 
   if (dragMode === 'left') {
     const newLow = Math.min(dragStartLow + df, (props.filterHigh || 0) - 100)
-    emit('update:filter', Math.round(newLow), props.filterHigh || 0)
+    emitFilter(Math.round(newLow), props.filterHigh || 0)
   } else if (dragMode === 'right') {
     const newHigh = Math.max(dragStartHigh + df, (props.filterLow || 0) + 100)
-    emit('update:filter', props.filterLow || 0, Math.round(newHigh))
+    emitFilter(props.filterLow || 0, Math.round(newHigh))
   } else if (dragMode === 'center') {
-    const bw = dragStartHigh - dragStartLow
     const newLow = dragStartLow + df
     const newHigh = dragStartHigh + df
     const halfBW = props.sampleRate / 2
     // Clamp to passband
     if (newLow > -halfBW && newHigh < halfBW) {
-      emit('update:filter', Math.round(newLow), Math.round(newHigh))
+      emitFilter(Math.round(newLow), Math.round(newHigh))
     }
   }
 }
@@ -187,10 +193,6 @@ function updateCanvasSize() {
     }
   }
 }
-
-watch([canvasWidth, spectrumHeight, waterfallHeight], () => {
-  updateCanvasSize()
-})
 </script>
 
 <style scoped>

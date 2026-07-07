@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, watch } from 'vue'
 
 // Shared spectrum bins setting (number of bins sent over WebSocket)
 // Default 1024 to reduce bandwidth; 0 = full FFT data
@@ -7,6 +7,56 @@ const spectrumBins = ref(1024)
 // Export spectrumBins directly so other components (e.g. GainPanel)
 // can access it without creating a redundant WebSocket connection.
 export { spectrumBins }
+
+// Colormap: muted viridis-inspired (dark navy → teal → green → warm yellow).
+// Module-level so the LUT below can use it without per-call branching.
+function getColor(norm: number): [number, number, number] {
+  // Map dB range [-100, 0] to [0, 1]
+  if (norm < 0.25) {
+    const t = norm / 0.25
+    return [
+      Math.floor(t * 15),
+      Math.floor(t * 25),
+      Math.floor(20 + t * 70),
+    ] // black → dark navy
+  } else if (norm < 0.5) {
+    const t = (norm - 0.25) / 0.25
+    return [
+      Math.floor(15 + t * 25),
+      Math.floor(25 + t * 80),
+      Math.floor(90 + t * 30),
+    ] // dark navy → steel blue/teal
+  } else if (norm < 0.75) {
+    const t = (norm - 0.5) / 0.25
+    return [
+      Math.floor(40 + t * 80),
+      Math.floor(105 + t * 75),
+      Math.floor(120 - t * 60),
+    ] // teal → green
+  } else {
+    const t = (norm - 0.75) / 0.25
+    return [
+      Math.floor(120 + t * 100),
+      Math.floor(180 + t * 40),
+      Math.floor(60 - t * 40),
+    ] // green → warm yellow
+  }
+}
+
+// Precomputed 256-entry colormap lookup table (maps a normalized 0..255
+// brightness index to RGBA). Avoids re-running the branchy getColor for every
+// pixel of every waterfall row.
+const colormapLUT: Uint8ClampedArray = (() => {
+  const lut = new Uint8ClampedArray(256 * 4)
+  for (let i = 0; i < 256; i++) {
+    const [r, g, b] = getColor(i / 255)
+    lut[i * 4] = r
+    lut[i * 4 + 1] = g
+    lut[i * 4 + 2] = b
+    lut[i * 4 + 3] = 255
+  }
+  return lut
+})()
 
 export function useWaterfall() {
   const fftSize = ref(2048)
@@ -20,51 +70,15 @@ export function useWaterfall() {
   let reconnectTimer: number | null = null
   let rafId: number | null = null
 
-  // Colormap: muted viridis-inspired (dark navy → teal → green → warm yellow)
-  function getColor(db: number): [number, number, number] {
-    // Map dB range [-100, 0] to [0, 1]
-    const norm = Math.max(0, Math.min(1, (db + 100) / 100))
-    if (norm < 0.25) {
-      const t = norm / 0.25
-      return [
-        Math.floor(t * 15),
-        Math.floor(t * 25),
-        Math.floor(20 + t * 70),
-      ]                                    // black → dark navy
-    } else if (norm < 0.5) {
-      const t = (norm - 0.25) / 0.25
-      return [
-        Math.floor(15 + t * 25),
-        Math.floor(25 + t * 80),
-        Math.floor(90 + t * 30),
-      ]                                    // dark navy → steel blue/teal
-    } else if (norm < 0.75) {
-      const t = (norm - 0.5) / 0.25
-      return [
-        Math.floor(40 + t * 80),
-        Math.floor(105 + t * 75),
-        Math.floor(120 - t * 60),
-      ]                                    // teal → green
-    } else {
-      const t = (norm - 0.75) / 0.25
-      return [
-        Math.floor(120 + t * 100),
-        Math.floor(180 + t * 40),
-        Math.floor(60 - t * 40),
-      ]                                    // green → warm yellow
-    }
-  }
-
   function setCanvases(spectrum: HTMLCanvasElement, waterfall: HTMLCanvasElement) {
     canvas = spectrum
     ctx = spectrum.getContext('2d')
     waterfallCanvas = waterfall
     waterfallCtx = waterfall.getContext('2d')
-    draw()
   }
 
-  function draw() {
-    rafId = requestAnimationFrame(draw)
+  // Redraw only the spectrum trace (cheap). Runs every animation frame.
+  function drawSpectrum() {
     if (!ctx || !fftData.value) return
 
     const w = canvas!.width
@@ -72,7 +86,6 @@ export function useWaterfall() {
     const data = fftData.value
     const n = data.length
 
-    // Draw spectrum
     ctx.fillStyle = '#0a0a0a'
     ctx.fillRect(0, 0, w, h)
 
@@ -117,28 +130,44 @@ export function useWaterfall() {
     ctx.closePath()
     ctx.fillStyle = 'rgba(0, 255, 136, 0.08)'
     ctx.fill()
+  }
 
-    // Waterfall: shift down by 1 pixel and draw new line at top
-    if (waterfallCtx) {
-      const ww = waterfallCanvas!.width
-      const wh = waterfallCanvas!.height
+  // Advance the waterfall by exactly one row for the given FFT frame.
+  // Called once per received FFT message (not per animation frame) so the
+  // scroll rate tracks the FFT rate instead of the display refresh rate.
+  function drawWaterfallRow(data: Float32Array) {
+    if (!waterfallCtx || !waterfallCanvas) return
+    const ww = waterfallCanvas.width
 
-      // Shift existing content down
-      const imageData = waterfallCtx.getImageData(0, 0, ww, wh - 1)
-      waterfallCtx.putImageData(imageData, 0, 1)
+    // Scroll existing content down by 1px. drawImage of a canvas onto itself
+    // with a pure translation is well-defined (the source bitmap is snapshotted
+    // first) and is GPU-accelerated — far cheaper than getImageData/putImageData
+    // of the whole canvas every frame.
+    waterfallCtx.drawImage(waterfallCanvas, 0, 1)
 
-      // Draw new line at top
-      const lineImageData = waterfallCtx.createImageData(ww, 1)
-      for (let x = 0; x < ww; x++) {
-        const idx = Math.floor((x / ww) * n)
-        const [r, g, b] = getColor(data[idx])
-        lineImageData.data[x * 4] = r
-        lineImageData.data[x * 4 + 1] = g
-        lineImageData.data[x * 4 + 2] = b
-        lineImageData.data[x * 4 + 3] = 255
-      }
-      waterfallCtx.putImageData(lineImageData, 0, 0)
+    // Draw the new top row via the precomputed colormap LUT.
+    const row = waterfallCtx.createImageData(ww, 1)
+    const n = data.length
+    const px = row.data
+    for (let x = 0; x < ww; x++) {
+      const idx = Math.floor((x / ww) * n)
+      let norm = (data[idx] + 100) / 100
+      if (norm < 0) norm = 0
+      else if (norm > 1) norm = 1
+      const ci = (norm * 255) | 0
+      const o = x * 4
+      const co = ci * 4
+      px[o] = colormapLUT[co]
+      px[o + 1] = colormapLUT[co + 1]
+      px[o + 2] = colormapLUT[co + 2]
+      px[o + 3] = 255
     }
+    waterfallCtx.putImageData(row, 0, 0)
+  }
+
+  function loop() {
+    rafId = requestAnimationFrame(loop)
+    drawSpectrum()
   }
 
   function connect() {
@@ -169,6 +198,8 @@ export function useWaterfall() {
         arr[i] = buf.getFloat32(i * 4, true)
       }
       fftData.value = arr
+      // Advance the waterfall one row per FFT frame.
+      drawWaterfallRow(arr)
     }
 
     ws.onclose = () => {
@@ -179,7 +210,7 @@ export function useWaterfall() {
     }
   }
 
-  // Reconnect when spectrum bins changes
+  // Reconnect when spectrum bins changes (replaces the 200ms polling loop)
   function onBinsChange() {
     if (ws) {
       ws.onclose = null
@@ -193,23 +224,15 @@ export function useWaterfall() {
     connect()
   }
 
-  // Watch for bins changes
-  let prevBins = spectrumBins.value
-  const checkBins = () => {
-    if (spectrumBins.value !== prevBins) {
-      prevBins = spectrumBins.value
-      onBinsChange()
-    }
-  }
-  const binsInterval = setInterval(checkBins, 200)
+  const stopWatch = watch(spectrumBins, onBinsChange)
 
   connect()
-  draw()
+  loop()
 
   onUnmounted(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer)
     if (rafId) cancelAnimationFrame(rafId)
-    clearInterval(binsInterval)
+    stopWatch()
     if (ws) {
       ws.onclose = null
       ws.onerror = null

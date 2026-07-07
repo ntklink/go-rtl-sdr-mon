@@ -44,7 +44,6 @@
         v-else
         ref="canvasRef"
         :width="APT_LINE_WIDTH"
-        :height="lines.length"
         class="apt-canvas"
       ></canvas>
     </div>
@@ -64,7 +63,7 @@ import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
 import { useStatus } from '../composables/useStatus'
 
-const { lines, stats, resetImage, saveImage } = useNoAA()
+const { lines, receivedLines, stats, resetImage, saveImage } = useNoAA()
 const api = useApi()
 const { t } = useI18n()
 const { status } = useStatus()
@@ -72,15 +71,17 @@ const { status } = useStatus()
 const APT_LINE_WIDTH = 2080
 const satellites = ref<Satellite[]>([])
 const canvasRef = ref<HTMLCanvasElement | null>(null)
-let drawTimer: ReturnType<typeof setInterval> | null = null
+
+// Number of rows already rendered to the canvas. Used to draw only the newly
+// received lines incrementally instead of redrawing the whole image every
+// update (the old code did a full O(width*height) redraw both on a 200ms
+// timer and on every new line).
+let drawnLines = 0
 
 async function loadSatellites() {
   try {
-    const resp = await fetch('/api/noaa/satellites')
-    if (resp.ok) {
-      const data = await resp.json()
-      satellites.value = data.satellites || []
-    }
+    const resp = await api.getNOAASatellites()
+    satellites.value = resp.satellites || []
   } catch {
     // ignore
   }
@@ -98,49 +99,88 @@ async function selectSatellite(sat: Satellite) {
   }
 }
 
+// Paint rows [yStart, yEnd) from lines.value into the canvas.
+function drawRows(ctx: CanvasRenderingContext2D, yStart: number, yEnd: number) {
+  const w = APT_LINE_WIDTH
+  const img = ctx.createImageData(w, yEnd - yStart)
+  for (let y = yStart; y < yEnd; y++) {
+    const line = lines.value[y]
+    if (!line) continue
+    const len = Math.min(w, line.length)
+    for (let x = 0; x < len; x++) {
+      const v = line[x]
+      const idx = ((y - yStart) * w + x) * 4
+      img.data[idx] = v
+      img.data[idx + 1] = v
+      img.data[idx + 2] = v
+      img.data[idx + 3] = 255
+    }
+  }
+  ctx.putImageData(img, 0, yStart)
+}
+
 function drawCanvas() {
   const canvas = canvasRef.value
-  if (!canvas || lines.value.length === 0) return
-
-  // Adjust canvas height
-  if (canvas.height !== lines.value.length) {
-    canvas.height = lines.value.length
+  if (!canvas) return
+  const n = lines.value.length
+  if (n === 0) {
+    drawnLines = 0
+    return
   }
-
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const imageData = ctx.createImageData(canvas.width, canvas.height)
-  for (let y = 0; y < lines.value.length; y++) {
-    const line = lines.value[y]
-    for (let x = 0; x < canvas.width && x < line.length; x++) {
-      const v = line[x]
-      const idx = (y * canvas.width + x) * 4
-      imageData.data[idx] = v
-      imageData.data[idx + 1] = v
-      imageData.data[idx + 2] = v
-      imageData.data[idx + 3] = 255
+  if (canvas.width !== APT_LINE_WIDTH) {
+    canvas.width = APT_LINE_WIDTH
+    drawnLines = 0
+  }
+
+  // Keep the backing height equal to n (no blank space below the image),
+  // preserving already-drawn rows when growing.
+  if (canvas.height !== n) {
+    if (n > drawnLines && drawnLines > 0 && canvas.height > 0) {
+      // Growth: snapshot the valid rows, resize (which clears), restore.
+      const keep = Math.min(drawnLines, canvas.height)
+      const tmp = document.createElement('canvas')
+      tmp.width = canvas.width
+      tmp.height = keep
+      tmp.getContext('2d')!.drawImage(canvas, 0, 0, tmp.width, keep, 0, 0, tmp.width, keep)
+      canvas.height = n
+      ctx.drawImage(tmp, 0, 0)
+      // drawnLines unchanged (content preserved)
+    } else {
+      // Shrink (reset) or fresh canvas: clear and redraw from scratch.
+      canvas.height = n
+      drawnLines = 0
     }
   }
-  ctx.putImageData(imageData, 0, 0)
+
+  if (n > drawnLines) {
+    // New rows appended: paint only the delta.
+    drawRows(ctx, drawnLines, n)
+    drawnLines = n
+  } else if (n === drawnLines && n > 0) {
+    // Buffer is full and shifted by one (oldest dropped): scroll up by 1
+    // and paint the new bottom row.
+    ctx.drawImage(canvas, 0, -1)
+    drawRows(ctx, n - 1, n)
+  }
 }
 
 onMounted(() => {
   loadSatellites()
-  // Redraw canvas at ~5 fps
-  drawTimer = setInterval(drawCanvas, 200)
+  nextTick(drawCanvas)
+})
+
+// Redraw incrementally whenever a new line arrives (receivedLines increments
+// even when the buffer is full and shifts). Replaces the old 200ms full-redraw
+// interval.
+const stopWatch = watch(receivedLines, () => {
+  nextTick(drawCanvas)
 })
 
 onUnmounted(() => {
-  if (drawTimer) {
-    clearInterval(drawTimer)
-    drawTimer = null
-  }
-})
-
-// Redraw when lines change
-watch(() => lines.value.length, () => {
-  nextTick(drawCanvas)
+  stopWatch()
 })
 </script>
 

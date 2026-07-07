@@ -1,5 +1,6 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { useStatus } from './useStatus'
+import { useApi } from './useApi'
 
 export interface APTLine {
   lineNum: number
@@ -18,10 +19,16 @@ const APT_LINE_WIDTH = 2080
 // Shared state across components
 const lines = ref<Uint8Array[]>([])
 const maxLines = 2000
+// Monotonically increasing counter of received lines (incremented even when
+// the buffer is full and a shift occurs), so the UI can detect new lines
+// without polling and redraw incrementally.
+const receivedLines = ref(0)
 const stats = ref<{ lines: number; sync: number }>({ lines: 0, sync: 0 })
 let ws: WebSocket | null = null
 let statsTimer: ReturnType<typeof setInterval> | null = null
 let refCount = 0
+
+const api = useApi()
 
 function connectAPT() {
   if (ws) return
@@ -33,22 +40,22 @@ function connectAPT() {
   ws.binaryType = 'arraybuffer'
 
   ws.onmessage = (event) => {
-    const data = new Uint8Array(event.data)
-    if (data.length < 4) return
+    const ab = event.data as ArrayBuffer
+    if (ab.byteLength < 4) return
 
-    const view = new DataView(event.data)
-    const lineNum = view.getUint32(0, true)
-    const pixels = data.slice(4)
+    // The 4-byte line number prefix is unused on the client (display follows
+    // arrival order, which equals line order over an ordered WebSocket).
+    // Zero-copy view of the pixel bytes (the WebSocket buffer is not reused).
+    const pixels = new Uint8Array(ab, 4)
 
-    // Store line (circular buffer)
-    if (lines.value.length >= maxLines) {
-      const idx = lineNum % maxLines
-      if (idx < lines.value.length) {
-        lines.value[idx] = pixels
-      }
-    } else {
-      lines.value.push(pixels)
+    // Append in arrival order and cap to maxLines. A simple shift keeps the
+    // array in display order (the previous lineNum%-based ring scrambled
+    // rows after wrapping past maxLines).
+    lines.value.push(pixels)
+    if (lines.value.length > maxLines) {
+      lines.value.shift()
     }
+    receivedLines.value++
   }
 
   ws.onclose = () => {
@@ -71,10 +78,7 @@ function startStatsPolling() {
   if (statsTimer) return
   const poll = async () => {
     try {
-      const resp = await fetch('/api/apt-stats')
-      if (resp.ok) {
-        stats.value = await resp.json()
-      }
+      stats.value = await api.getAPTStats()
     } catch {
       // ignore
     }
@@ -113,7 +117,8 @@ export function useNoAA() {
 
   function resetImage() {
     lines.value = []
-    fetch('/api/apt-reset', { method: 'POST' })
+    receivedLines.value = 0
+    api.resetAPT()
   }
 
   function saveImage() {
@@ -164,6 +169,7 @@ export function useNoAA() {
 
   return {
     lines,
+    receivedLines,
     stats,
     resetImage,
     saveImage,

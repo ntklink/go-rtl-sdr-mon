@@ -42,7 +42,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { SelectRoot, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
+import { SelectRoot, SelectTrigger, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
 import { useI18n } from '../composables/useI18n'
 
 const { t } = useI18n()

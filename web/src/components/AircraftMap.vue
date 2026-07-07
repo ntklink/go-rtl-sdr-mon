@@ -71,11 +71,6 @@ watch(rxPos, (pos) => {
   map.flyTo([pos.lat, pos.lon], 8, { duration: 1.0 })
 }, { deep: true })
 
-function formatAlt(alt: number): string {
-  if (alt >= 1000) return (alt / 1000).toFixed(1) + 'km'
-  return alt + 'm'
-}
-
 function updateMarkers() {
   if (!map) return
 
@@ -138,9 +133,11 @@ function updateMarkers() {
   }
 }
 
+// The aircraft array is replaced wholesale on every WebSocket message, so a
+// shallow watch suffices (deep was redundant and added per-field overhead).
 watch(aircraft, () => {
   updateMarkers()
-}, { deep: true })
+})
 
 onMounted(() => {
   initMap()
