@@ -921,10 +921,113 @@ func (r *Receiver) ResetAPT() {
 }
 
 // SetDemod sets the demodulator type.
+// When switching to/from ADS-B (which requires a different sample rate),
+// the processing loop and source stream are stopped first to avoid a
+// deadlock: reconfigureSampleRate calls source.SetSampleRate which blocks
+// if ReadAsync is running, and the ReadAsync callback blocks on sampleCh
+// which processLoop can't drain because it's waiting for r.mu held by us.
 func (r *Receiver) SetDemod(dt DemodType) {
+	// Determine whether a sample-rate change is required.
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	needsRateChange := false
+	if r.demodType == DemodADSB && dt != DemodADSB && r.prevSampleRate != 0 {
+		needsRateChange = true // leaving ADS-B, restore previous rate
+	}
+	if dt == DemodADSB && r.config.SampleRate != ADSBSampleRate {
+		needsRateChange = true // entering ADS-B, switch to 2 MHz
+	}
+	r.mu.Unlock()
+
+	if !needsRateChange {
+		// No sample-rate change: just swap the demodulator under lock.
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.setDemodulatorNoRateChange(dt)
+		return
+	}
+
+	// Sample-rate change required: stop loop + source, reconfigure, restart.
+	// 1. Stop the processing loop (don't hold r.mu while waiting for loopDone).
+	r.mu.Lock()
+	wasRunning := r.running
+	if wasRunning {
+		close(r.stopCh)
+		r.running = false
+	}
+	done := r.loopDone
+	r.mu.Unlock()
+	if wasRunning {
+		<-done
+	}
+
+	// 2. Stop the source stream so SetSampleRate won't block on ReadAsync.
+	r.source.Stop()
+
+	// 3. Reconfigure sample rate and demodulator under lock.
+	r.mu.Lock()
 	r.setDemodulator(dt)
+	r.mu.Unlock()
+
+	// 4. Restart the source stream (Start blocks, so run in a goroutine).
+	go func() {
+		if err := r.source.Start(); err != nil {
+			log.Printf("SDR source restart error after demod switch: %v", err)
+		}
+	}()
+
+	// 5. Restart the processing loop.
+	r.Start()
+}
+
+// setDemodulatorNoRateChange switches the demodulator without touching the
+// sample rate. Used when the new mode uses the same sample rate as the current one.
+func (r *Receiver) setDemodulatorNoRateChange(dt DemodType) {
+	// Clear prevSampleRate if leaving ADS-B without a rate change
+	// (e.g., ADS-B was never actually set to a different rate).
+	if r.demodType == DemodADSB && dt != DemodADSB {
+		r.prevSampleRate = 0
+	}
+	r.demodType = dt
+	quadRate := r.ddc.QuadRate()
+	isCW := dt == DemodCWL || dt == DemodCWU
+
+	switch dt {
+	case DemodNFM:
+		r.demod = demod.NewFMDemod(quadRate, 5000, 75e-6)
+	case DemodWFM:
+		r.demod = demod.NewWFMDemod(quadRate, 75000, false, false)
+	case DemodWFMStereo:
+		r.demod = demod.NewWFMDemod(quadRate, 75000, true, false)
+	case DemodWFMOirt:
+		r.demod = demod.NewWFMDemod(quadRate, 75000, true, true)
+	case DemodAM:
+		r.demod = demod.NewAMDemod(quadRate, true)
+	case DemodAMSync:
+		r.demod = demod.NewAMSyncDemod(quadRate, true, 0.001)
+	case DemodLSB, DemodUSB, DemodCWL, DemodCWU:
+		r.demod = demod.NewSSBDemod(quadRate)
+	case DemodRaw:
+		r.demod = demod.NewSSBDemod(quadRate)
+	case DemodADSB:
+		r.demod = nil
+	case DemodNOAA:
+		r.demod = demod.NewFMDemod(quadRate, 17000, 0)
+	case DemodOff:
+		r.demod = nil
+	}
+
+	if isCW {
+		r.ddc.SetCenterFreq(r.filterOffset - r.cwOffset)
+	} else {
+		r.ddc.SetCenterFreq(r.filterOffset)
+	}
+
+	if dt != DemodOff {
+		preset := filterPresetTable[dt]
+		r.filterLow = preset[FilterPresetNormal][0]
+		r.filterHigh = preset[FilterPresetNormal][1]
+		r.updateFilter()
+	}
 }
 
 // SetSquelch sets the squelch level in dBFS.
