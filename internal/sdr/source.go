@@ -21,9 +21,10 @@ type RTLSDRSource struct {
 	gain           int // tenths of dB
 	bandwidth      uint32
 
-	mu      sync.Mutex
-	running bool
-	stopCh  chan struct{}
+	mu        sync.Mutex
+	running   bool
+	stopCh    chan struct{}
+	startDone chan struct{} // closed when Start()'s ReadAsync returns
 
 	// bufferSize is the async read buffer size in bytes (0 = default).
 	bufferSize uint32
@@ -116,7 +117,18 @@ func (s *RTLSDRSource) Start() error {
 	}
 	s.running = true
 	s.stopCh = make(chan struct{})
+	s.startDone = make(chan struct{})
 	s.mu.Unlock()
+
+	// Ensure startDone is closed when ReadAsync returns (whether normally
+	// or via CancelAsync from Stop).  This allows Stop() to reliably wait
+	// for the device to fully release before a new Start() can proceed.
+	defer func() {
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		close(s.startDone)
+	}()
 
 	if err := s.dev.ResetBuffer(); err != nil {
 		return fmt.Errorf("reset buffer: %w", err)
@@ -135,23 +147,31 @@ func (s *RTLSDRSource) Start() error {
 		}
 	}, 0, bufLen)
 
-	s.mu.Lock()
-	s.running = false
-	s.mu.Unlock()
-
 	return err
 }
 
-// Stop stops sample reading.
+// Stop stops sample reading. It waits for the ReadAsync call inside Start()
+// to fully return before returning itself, ensuring the device is free for
+// a subsequent Start() call.  Without this wait, CancelAsync() returns
+// immediately but the device may still be busy, causing the next ReadAsync
+// to fail with "already running" (rtlsdr error code -2).
 func (s *RTLSDRSource) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.running {
+		s.mu.Unlock()
 		return
 	}
 	close(s.stopCh)
 	s.running = false
+	done := s.startDone // may be nil if Start() never fully initialised
+	s.mu.Unlock()
+
 	_ = s.dev.CancelAsync()
+
+	// Wait for Start() to actually finish so the device is fully released.
+	if done != nil {
+		<-done
+	}
 }
 
 // Close closes the device.
