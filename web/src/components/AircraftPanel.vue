@@ -22,8 +22,11 @@
 
     <div class="history-toggle">
       <label class="toggle-label">
+        <span class="toggle-track" :class="{ on: showHistory }">
+          <span class="toggle-thumb"></span>
+        </span>
         <input type="checkbox" v-model="showHistory" @change="onHistoryToggle" />
-        <span>{{ t('adsb.showHistory') }}</span>
+        <span class="toggle-text">{{ t('adsb.showHistory') }}</span>
       </label>
       <span class="history-count" v-if="showHistory">
         ({{ displayAircraft.length }})
@@ -280,20 +283,62 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
+  padding: 2px 0;
   font-size: 12px;
 }
 
 .toggle-label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
   color: #aaa;
+  position: relative;
 }
 
+/* Hide native checkbox */
 .toggle-label input[type="checkbox"] {
-  cursor: pointer;
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* iOS-style toggle switch */
+.toggle-track {
+  display: inline-block;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: #444;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.toggle-track.on {
+  background: #0c7;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.toggle-track.on .toggle-thumb {
+  transform: translateX(14px);
+}
+
+.toggle-text {
+  user-select: none;
 }
 
 .history-count {
