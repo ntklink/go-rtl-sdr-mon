@@ -81,14 +81,13 @@ import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
 import { useStatus, statusLoaded } from '../composables/useStatus'
 
-const { aircraft, showHistory, historyAircraft } = useAircraft()
+const { aircraft, showHistory, historyAircraft, selectedICAO } = useAircraft()
 const api = useApi()
 const { t } = useI18n()
 const { status } = useStatus()
 
 const rxLat = ref<number | undefined>(undefined)
 const rxLon = ref<number | undefined>(undefined)
-const selectedICAO = ref('')
 const geoLoading = ref(false)
 const geoError = ref('')
 const stats = ref<{ detected: number; valid: number; accepted: number; aircraft: number } | null>(null)
@@ -142,9 +141,9 @@ watch(statusLoaded, (loaded) => {
   }
 }, { immediate: true })
 
-const emit = defineEmits<{
-  'select-aircraft': [aircraft: Aircraft]
-}>()
+function selectAircraft(ac: Aircraft) {
+  selectedICAO.value = selectedICAO.value === ac.icao ? '' : ac.icao
+}
 
 const sortedAircraft = computed(() => {
   return [...displayAircraft.value].sort((a, b) => {
@@ -199,11 +198,6 @@ function requestGeolocation() {
     },
     { enableHighAccuracy: true, timeout: 10000 }
   )
-}
-
-function selectAircraft(ac: Aircraft) {
-  selectedICAO.value = ac.icao
-  emit('select-aircraft', ac)
 }
 
 // Auto-request browser geolocation on mount if no position is set yet

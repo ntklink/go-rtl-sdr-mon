@@ -23,6 +23,10 @@ let refCount = 0
 const aircraft = ref<Aircraft[]>([])
 export const aircraftLoaded = ref(false)
 
+// Shared selected aircraft ICAO address — set by AircraftPanel row clicks
+// or AircraftMap marker clicks, consumed by both for highlighting.
+export const selectedICAO = ref('')
+
 // History mode: when true, the UI shows all aircraft ever seen.
 export const showHistory = ref(false)
 const historyAircraft = ref<Aircraft[]>([])
@@ -67,5 +71,5 @@ export function useAircraft() {
     }
   })
 
-  return { aircraft, aircraftLoaded, showHistory, historyAircraft }
+  return { aircraft, aircraftLoaded, showHistory, historyAircraft, selectedICAO }
 }

@@ -1,5 +1,42 @@
 <template>
-  <div ref="mapContainer" class="aircraft-map"></div>
+  <div class="aircraft-map-wrap">
+    <div ref="mapContainer" class="aircraft-map"></div>
+    <Transition name="card">
+      <div v-if="selectedAircraft" class="aircraft-info-card">
+        <button class="card-close" @click="selectedICAO = ''" title="close">×</button>
+        <div class="card-header">
+          <span class="card-callsign">{{ selectedAircraft.callsign || '----' }}</span>
+          <span class="card-icao">{{ selectedAircraft.icao }}</span>
+        </div>
+        <div class="card-grid">
+          <div class="card-field">
+            <span class="card-label">{{ t('adsb.altitude') }}</span>
+            <span class="card-value">{{ selectedAircraft.altitude > 0 ? selectedAircraft.altitude + ' ft' : '---' }}</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">{{ t('adsb.speed') }}</span>
+            <span class="card-value">{{ selectedAircraft.speed > 0 ? selectedAircraft.speed.toFixed(0) + ' kt' : '---' }}</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">{{ t('adsb.track') }}</span>
+            <span class="card-value">{{ selectedAircraft.speed > 0 ? selectedAircraft.track.toFixed(0) + '°' : '---' }}</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">{{ t('adsb.vRate') }}</span>
+            <span class="card-value">{{ selectedAircraft.verticalRate !== 0 ? selectedAircraft.verticalRate + ' fpm' : '---' }}</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">{{ t('adsb.lat') }}</span>
+            <span class="card-value">{{ selectedAircraft.latitude.toFixed(4) }}°</span>
+          </div>
+          <div class="card-field">
+            <span class="card-label">{{ t('adsb.lon') }}</span>
+            <span class="card-value">{{ selectedAircraft.longitude.toFixed(4) }}°</span>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -8,9 +45,11 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAircraft, type Aircraft } from '../composables/useAircraft'
 import { useStatus } from '../composables/useStatus'
+import { useI18n } from '../composables/useI18n'
 
-const { aircraft } = useAircraft()
+const { aircraft, selectedICAO } = useAircraft()
 const { status } = useStatus()
+const { t } = useI18n()
 
 const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
@@ -40,6 +79,12 @@ const rxPos = computed(() => ({
 
 let lastRxLat = 0
 let lastRxLon = 0
+
+// The currently selected aircraft object (live-updating), or null.
+const selectedAircraft = computed<Aircraft | null>(() => {
+  if (!selectedICAO.value) return null
+  return aircraft.value.find((a) => a.icao === selectedICAO.value) ?? null
+})
 
 function initMap() {
   if (!mapContainer.value || map) return
@@ -71,6 +116,20 @@ watch(rxPos, (pos) => {
   map.flyTo([pos.lat, pos.lon], 8, { duration: 1.0 })
 }, { deep: true })
 
+function buildIconHtml(track: number, selected: boolean): string {
+  const color = selected ? '#ff8800' : '#00ff88'
+  const stroke = selected ? '#442200' : '#004400'
+  const size = selected ? 24 : 20
+  const ring = selected
+    ? `<div class="ac-ring"></div>`
+    : ''
+  return `${ring}<div class="ac-plane" style="transform: rotate(${track}deg);">
+    <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;">
+      <path d="M12 2 L9.5 13 L2 16 L2 17.5 L9.5 15.5 L9.5 21 L12 20 L14.5 21 L14.5 15.5 L22 17.5 L22 16 L14.5 13 Z" fill="${color}" stroke="${stroke}" stroke-width="0.5"/>
+    </svg>
+  </div>`
+}
+
 function updateMarkers() {
   if (!map) return
 
@@ -81,6 +140,9 @@ function updateMarkers() {
 
     seen.add(ac.icao)
     const pos: L.LatLngExpression = [ac.latitude, ac.longitude]
+    const selected = ac.icao === selectedICAO.value
+    const hasVel = ac.speed > 0
+    const rotDeg = hasVel ? ac.track : 0
 
     // Create popup content
     const callsign = ac.callsign || '---'
@@ -89,38 +151,37 @@ function updateMarkers() {
         <b>${callsign}</b><br>
         ICAO: ${ac.icao}<br>
         Alt: ${ac.altitude > 0 ? ac.altitude + ' ft' : '---'}<br>
-        Spd: ${ac.speed > 0 ? ac.speed.toFixed(0) + ' kt' : '---'}<br>
-        Trk: ${ac.track > 0 ? ac.track.toFixed(0) + '°' : '---'}<br>
+        Spd: ${hasVel ? ac.speed.toFixed(0) + ' kt' : '---'}<br>
+        Trk: ${hasVel ? ac.track.toFixed(0) + '°' : '---'}<br>
         ${ac.verticalRate !== 0 ? 'V/S: ' + ac.verticalRate + ' ft/min' : ''}
       </div>`
 
     // Create or update marker
     let marker = markers.get(ac.icao)
-    if (marker) {
-      marker.setLatLng(pos)
-      marker.setPopupContent(popupHtml)
-    } else {
-      // Use a plane icon or default marker
+    if (!marker) {
       const icon = L.divIcon({
         className: 'aircraft-marker',
-        html: `<div style="transform: rotate(${ac.track}deg); font-size:18px; color:#00ff88;">✈</div>`,
+        html: buildIconHtml(rotDeg, selected),
         iconSize: [24, 24],
         iconAnchor: [12, 12],
       })
       marker = L.marker(pos, { icon }).addTo(map!)
       marker.bindPopup(popupHtml)
+      // Click a marker to select that aircraft (toggle off if already selected).
+      marker.on('click', () => {
+        selectedICAO.value = selectedICAO.value === ac.icao ? '' : ac.icao
+      })
       markers.set(ac.icao, marker)
-    }
-
-    // Update rotation if icon exists
-    if (ac.track > 0) {
-      const el = marker.getElement()
-      if (el) {
-        const inner = el.querySelector('div')
-        if (inner) {
-          inner.style.transform = `rotate(${ac.track}deg)`
-        }
-      }
+    } else {
+      marker.setLatLng(pos)
+      marker.setPopupContent(popupHtml)
+      // Rebuild icon HTML to reflect current selection state and rotation.
+      marker.setIcon(L.divIcon({
+        className: 'aircraft-marker',
+        html: buildIconHtml(rotDeg, selected),
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      }))
     }
   }
 
@@ -139,6 +200,18 @@ watch(aircraft, () => {
   updateMarkers()
 })
 
+// Fly to the selected aircraft when selection changes.
+watch(selectedICAO, (icao) => {
+  if (!map || !icao) return
+  const ac = aircraft.value.find((a) => a.icao === icao)
+  if (!ac || (ac.latitude === 0 && ac.longitude === 0)) return
+  // Keep current zoom level if already close in, otherwise zoom in.
+  const curZoom = map.getZoom()
+  const targetZoom = curZoom < 8 ? 8 : curZoom
+  map.flyTo([ac.latitude, ac.longitude], targetZoom, { duration: 0.8 })
+  updateMarkers()
+})
+
 onMounted(() => {
   initMap()
   setTimeout(() => map?.invalidateSize(), 100)
@@ -152,10 +225,107 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.aircraft-map-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
 .aircraft-map {
   width: 100%;
   height: 100%;
   background: #1a1a2e;
+}
+
+/* Selected-aircraft info card overlay */
+.aircraft-info-card {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  width: 220px;
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #3a3a4e;
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  color: #e0e0e0;
+}
+
+.card-close {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.card-close:hover {
+  color: #ff8800;
+}
+
+.card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #333;
+}
+
+.card-callsign {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ff8800;
+}
+
+.card-icao {
+  font-size: 12px;
+  color: #888;
+  font-family: monospace;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.card-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card-value {
+  font-size: 13px;
+  color: #e0e0e0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Card enter/leave transition */
+.card-enter-active,
+.card-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.card-enter-from,
+.card-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 /* Dark theme for Leaflet UI elements */
@@ -192,5 +362,29 @@ onUnmounted(() => {
 .aircraft-marker {
   background: transparent !important;
   border: none !important;
+}
+
+/* Plane icon wrapper (rotation applied here) */
+.aircraft-marker .ac-plane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: transform 0.3s ease;
+}
+
+/* Highlight ring for the selected aircraft (static, non-animated) */
+.aircraft-marker .ac-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border: 2px solid #ff8800;
+  border-radius: 50%;
+  opacity: 0.7;
+  pointer-events: none;
 }
 </style>
