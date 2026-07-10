@@ -567,10 +567,14 @@ func (r *Receiver) processBlock(samples []complex128) {
 	} else if r.demod != nil {
 		left, right := r.demod.Process(filtered)
 
-		// 7. AGC (independent per channel so stereo L/R gains don't cross-couple)
-		left = r.agc.Process(left)
-		if right != nil {
-			right = r.agcR.Process(right)
+		// 7. AGC (independent per channel so stereo L/R gains don't cross-couple).
+		// NOAA APT encodes image data in AM amplitude variations, so AGC must
+		// be skipped in NOAA mode — it would flatten the AM envelope.
+		if r.demodType != DemodNOAA {
+			left = r.agc.Process(left)
+			if right != nil {
+				right = r.agcR.Process(right)
+			}
 		}
 
 		// 8. Audio resampling

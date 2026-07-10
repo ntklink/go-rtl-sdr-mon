@@ -56,9 +56,11 @@ const freqUnit = computed(() => freqUnitSelect.value)
 
 const formattedFreq = computed(() => {
   const f = props.frequency
-  if (f >= 1e6) return (f / 1e6).toFixed(4)
-  if (f >= 1e3) return (f / 1e3).toFixed(2)
-  return f.toString()
+  switch (freqUnitSelect.value) {
+    case 'MHz': return (f / 1e6).toFixed(4)
+    case 'kHz': return (f / 1e3).toFixed(2)
+    default: return f.toString()
+  }
 })
 
 function applyFreq() {
