@@ -155,8 +155,10 @@ func (t *Tracker) decodePosition(aircraft *Aircraft, icao string) {
 		evenTime := t.cprEvenTime[icao]
 		oddTime := t.cprOddTime[icao]
 		if time.Since(evenTime) < 10*time.Second && time.Since(oddTime) < 10*time.Second {
-			// Global CPR decoding
-			lat, lon, ok := decodeCPRGlobal(evenLat, evenLon, oddLat, oddLon)
+			// Global CPR decoding. Use whichever message arrived most
+			// recently to pick the longitude zone (matches dump1090).
+			useEven := evenTime.After(oddTime)
+			lat, lon, ok := decodeCPRGlobal(evenLat, evenLon, oddLat, oddLon, useEven)
 			if ok {
 				aircraft.Latitude = lat
 				aircraft.Longitude = lon
