@@ -917,13 +917,13 @@ func (r *Receiver) GetADSBStats() (detected, valid, accepted, aircraftCount int)
 }
 
 // GetAPTStats returns NOAA APT decoder statistics.
-func (r *Receiver) GetAPTStats() (linesDecoded, syncFound int) {
+func (r *Receiver) GetAPTStats() (linesDecoded, syncFound int, signalLevel float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.aptDecoder != nil {
 		return r.aptDecoder.Stats()
 	}
-	return 0, 0
+	return 0, 0, 0
 }
 
 // ResetAPT clears the APT decoder state and image buffer.

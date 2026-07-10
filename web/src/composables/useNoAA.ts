@@ -23,7 +23,7 @@ const maxLines = 2000
 // the buffer is full and a shift occurs), so the UI can detect new lines
 // without polling and redraw incrementally.
 const receivedLines = ref(0)
-const stats = ref<{ lines: number; sync: number }>({ lines: 0, sync: 0 })
+const stats = ref<{ lines: number; sync: number; signalLevel: number }>({ lines: 0, sync: 0, signalLevel: 0 })
 let ws: WebSocket | null = null
 let statsTimer: ReturnType<typeof setInterval> | null = null
 let refCount = 0

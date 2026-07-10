@@ -24,10 +24,20 @@
         <span class="stat-label">{{ t('noaa.sync') }}:</span>
         <span class="stat-value" :class="{ zero: stats.sync === 0 }">{{ stats.sync }}</span>
       </span>
+      <span class="stat-item signal-item">
+        <span class="stat-label">{{ t('noaa.signal') }}</span>
+        <span class="signal-bar-wrap">
+          <span class="signal-bar-fill" :class="signalClass" :style="{ width: signalPct + '%' }"></span>
+        </span>
+        <span class="signal-text" :class="signalClass">{{ signalLabel }}</span>
+      </span>
     </div>
 
-    <div class="tip-bar" v-if="stats && stats.sync === 0">
-      {{ t('noaa.tip') }}
+    <div class="tip-bar" v-if="stats && stats.signalLevel < 0.01">
+      {{ t('noaa.noSignal') }}
+    </div>
+    <div class="tip-bar" v-else-if="stats && stats.sync === 0 && stats.signalLevel >= 0.01">
+      {{ t('noaa.noSync') }}
     </div>
 
     <!-- Image display -->
@@ -47,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useNoAA, type Satellite } from '../composables/useNoAA'
 import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
@@ -61,6 +71,21 @@ const { status } = useStatus()
 const APT_LINE_WIDTH = 2080
 const satellites = ref<Satellite[]>([])
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+
+// Signal level display helpers
+const signalPct = computed(() => Math.min(100, Math.max(0, (stats.value.signalLevel || 0) * 500)))
+const signalClass = computed(() => {
+  const s = stats.value.signalLevel || 0
+  if (s < 0.01) return 'sig-none'
+  if (s < 0.05) return 'sig-weak'
+  return 'sig-good'
+})
+const signalLabel = computed(() => {
+  const s = stats.value.signalLevel || 0
+  if (s < 0.01) return t('noaa.signalNone')
+  if (s < 0.05) return t('noaa.signalWeak')
+  return t('noaa.signalGood')
+})
 
 // Number of rows already rendered to the canvas. Used to draw only the newly
 // received lines incrementally instead of redrawing the whole image every
@@ -205,6 +230,57 @@ onUnmounted(() => {
 
 .stat-value.zero {
   color: var(--text-muted, #666);
+}
+
+.signal-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.signal-bar-wrap {
+  flex: 1;
+  height: 10px;
+  background: #1a1a2e;
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.signal-bar-fill {
+  display: block;
+  height: 100%;
+  transition: width 0.5s ease;
+  border-radius: 3px;
+}
+
+.signal-bar-fill.sig-none {
+  background: #555;
+}
+
+.signal-bar-fill.sig-weak {
+  background: linear-gradient(90deg, #ff9800, #ffc107);
+}
+
+.signal-bar-fill.sig-good {
+  background: linear-gradient(90deg, #4caf50, #8bc34a);
+}
+
+.signal-text {
+  font-size: 10px;
+  font-weight: bold;
+  min-width: 20px;
+}
+
+.signal-text.sig-none {
+  color: #666;
+}
+
+.signal-text.sig-weak {
+  color: #ffc107;
+}
+
+.signal-text.sig-good {
+  color: #8bc34a;
 }
 
 .tip-bar {

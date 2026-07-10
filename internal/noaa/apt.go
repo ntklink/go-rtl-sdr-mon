@@ -48,41 +48,61 @@ func (b *biquad) process(x float64) float64 {
 // The APT signal uses a 2.4 kHz subcarrier that is AM-modulated with pixel
 // brightness data. Each line is 0.5 seconds (2080 pixels at 4160 Hz).
 // Sync A is 7 cycles at 1040 Hz; sync B is 7 cycles at 832 Hz.
+//
+// Decoding chain:
+//  1. Bandpass around 2.4 kHz (wide enough to pass the full AM sidebands,
+//     320–4480 Hz) → rectify → cascaded lowpass envelope
+//  2. Linear-interpolated resampling to the 4160 Hz pixel rate
+//  3. Per-line sync-A correlation to keep rows aligned (this is the key
+//     fix for "garbled" images: doppler shift and non-integer sample
+//     ratios cause progressive row skew if sync is only acquired once).
 type APTDecoder struct {
 	sampleRate float64 // input audio rate (typically 48000)
 
-	// AM demod chain: bandpass 2.4 kHz → rectify → lowpass
-	bpSubcarrier *biquad // bandpass centered at 2.4 kHz
-	lpEnvelope   *biquad // lowpass for envelope extraction
+	// AM demod chain
+	bpSubcarrier *biquad // bandpass centered at 2.4 kHz, wide enough for AM sidebands
+	lpEnvelope1  *biquad // first lowpass stage for envelope extraction
+	lpEnvelope2  *biquad // second lowpass stage (steeper rolloff)
 
-	// Decimation: sampleRate → PixelRate (4160 Hz)
+	// Resampling: sampleRate → PixelRate (4160 Hz) via linear interpolation
 	samplesPerPixel float64 // sampleRate / PixelRate
-	decimPhase      float64 // accumulated phase for decimation
-	decimAccum      float64 // sample accumulator for current pixel
-	decimCount      int     // samples accumulated for current pixel
+	phase           float64 // accumulated fractional phase
+	prevSample      float64 // previous filtered sample (for linear interp)
 
-	// Line assembly
-	pixelBuf  []float64 // pixels for the current line (up to LinePixels)
-	lineCount int       // total lines processed (for stats)
+	// Pixel stream buffer (continuously growing; pruned after line extraction)
+	pixelStream []float64
 
-	// Sync detection
-	syncRefA    []float64 // reference sync A pattern (normalized)
-	syncFound   int       // number of sync frames detected
-	syncLocked  bool      // whether we have sync lock
-	lineOffset  int       // pixel offset within current line
-	syncQuality float64   // last sync correlation quality (0..1)
+	// Per-line sync tracking
+	syncPattern []float64 // 32-sample sync A reference (aptdec-style)
+	lineStart   int       // index into pixelStream where the current line starts
+	syncLocked  bool      // whether we have ever acquired sync
+
+	// Doppler / sample-rate tracking: the measured offset of each sync
+	// pulse from its expected position tells us how much the effective
+	// samples-per-pixel differs from the nominal value.  A slow EMA
+	// adjusts the resampler to compensate.
+	sppCorrection float64
+
+	// Signal level: EMA of the 2.4 kHz subcarrier envelope RMS, used as a
+	// diagnostic to tell "no signal" (antenna/frequency problem) from
+	// "bad decoding".
+	signalLevel float64
+
+	// Consecutive sync hits before locking (reduces false positives on noise)
+	syncStreak int
 
 	// Image storage
-	lines    [][]byte // decoded lines (each 2080 bytes)
-	maxLines int      // maximum lines to store
-	ringIdx  int      // next write index in the ring buffer (lines)
+	lines    [][]byte
+	maxLines int
+	ringIdx  int
 
-	// Brightness reference: a slowly-tracking peak used to scale every line
-	// consistently (per-line min/max stretching destroys inter-line continuity).
+	// Brightness reference (slow peak tracker for consistent scaling)
 	peakEnv float64
 
 	// Statistics
+	lineCount    int
 	linesDecoded int
+	syncFound    int
 }
 
 // NewAPTDecoder creates a new APT decoder for the given audio sample rate.
@@ -90,35 +110,33 @@ func NewAPTDecoder(sampleRate float64) *APTDecoder {
 	d := &APTDecoder{
 		sampleRate:      sampleRate,
 		samplesPerPixel: sampleRate / PixelRate,
-		pixelBuf:        make([]float64, 0, LinePixels),
-		maxLines:        2000, // store up to 2000 lines (~16 minutes)
+		maxLines:        2000,
 	}
 
-	// Bandpass: center 2.4 kHz, Q=3 (bandwidth ~800 Hz)
-	d.bpSubcarrier = newBandpass(sampleRate, 2400, 3.0)
+	// Bandpass: center 2.4 kHz, Q=0.6 → bandwidth ~4000 Hz, covering the
+	// full AM sidebands (2400 ± 2080 Hz = 320–4480 Hz).  The previous
+	// Q=3 (800 Hz bandwidth) clipped most of the image content.
+	d.bpSubcarrier = newBandpass(sampleRate, 2400, 0.6)
 
-	// Lowpass for envelope: 2.1 kHz cutoff (just below pixel Nyquist)
-	d.lpEnvelope = newLowpass(sampleRate, 2100, 0.707)
+	// Cascaded lowpass at 2080 Hz (pixel Nyquist) for envelope extraction.
+	// Two stages give a steeper rolloff than a single biquad.
+	d.lpEnvelope1 = newLowpass(sampleRate, 2080, 0.707)
+	d.lpEnvelope2 = newLowpass(sampleRate, 2080, 0.707)
 
-	// Generate sync A reference: 7 cycles at 1040 Hz, sampled at PixelRate
-	// At 4160 Hz, 1040 Hz = 4 samples per cycle, 7 cycles = 28 samples
-	syncLen := 28
-	d.syncRefA = make([]float64, syncLen)
-	for i := 0; i < syncLen; i++ {
-		// Square wave: high for first half of each cycle, low for second half
-		cyclePos := i % 4 // 4 samples per cycle at 1040 Hz / 4160 Hz
-		if cyclePos < 2 {
-			d.syncRefA[i] = 1.0
-		} else {
-			d.syncRefA[i] = -1.0
-		}
+	// Sync A reference pattern (32 samples at the pixel rate).
+	// This mirrors aptdec's sync_pattern: 7 cycles of a 1040 Hz pulse
+	// train (2 high / 2 low per cycle = 28 samples) with 4 transition
+	// samples.  Values are asymmetric (-14/+18) to match the DC offset of
+	// the real APT sync waveform.
+	d.syncPattern = []float64{
+		-14, -14, -14, 18, 18, -14, -14, 18, 18, -14, -14, 18, 18, -14, -14, 18,
+		18, -14, -14, 18, 18, -14, -14, 18, 18, -14, -14, 18, 18, -14, -14, -14,
 	}
 
 	return d
 }
 
 // Process feeds audio samples (float64, 48 kHz) to the decoder.
-// Returns any completed APT lines.
 func (d *APTDecoder) Process(samples []float64) []APTLine {
 	var completed []APTLine
 
@@ -129,156 +147,177 @@ func (d *APTDecoder) Process(samples []float64) []APTLine {
 		// 2. Rectify (envelope detection)
 		rect := math.Abs(filtered)
 
-		// 3. Lowpass to get smooth envelope
-		env := d.lpEnvelope.process(rect)
+		// 3. Cascaded lowpass to get smooth envelope
+		env := d.lpEnvelope1.process(rect)
+		env = d.lpEnvelope2.process(env)
 
-		// 4. Decimate to pixel rate (4160 Hz)
-		d.decimAccum += env
-		d.decimCount++
-		d.decimPhase += 1.0
+		// Track signal level (EMA of envelope) for diagnostics.
+		d.signalLevel = d.signalLevel*0.999 + env*0.001
 
-		if d.decimPhase >= d.samplesPerPixel {
-			pixel := d.decimAccum / float64(d.decimCount)
-			d.decimAccum = 0
-			d.decimCount = 0
-			d.decimPhase -= d.samplesPerPixel
-
-			completed = append(completed, d.processPixel(pixel)...)
+		// 4. Resample to pixel rate (4160 Hz) via linear interpolation.
+		d.phase += 1.0
+		effectiveSPP := d.samplesPerPixel + d.sppCorrection
+		if effectiveSPP < 1 {
+			effectiveSPP = 1
 		}
+		for d.phase >= effectiveSPP {
+			frac := d.phase / effectiveSPP
+			if frac > 1 {
+				frac = 1
+			}
+			pixel := d.prevSample + frac*(env-d.prevSample)
+			d.pixelStream = append(d.pixelStream, pixel)
+			d.phase -= effectiveSPP
+		}
+		d.prevSample = env
+
+		// 5. Try to extract complete lines
+		completed = append(completed, d.tryExtractLines()...)
 	}
 
 	return completed
 }
 
-// processPixel handles one decoded pixel value.
-func (d *APTDecoder) processPixel(pixel float64) []APTLine {
+// tryExtractLines checks if enough pixels have accumulated to extract one or
+// more complete lines, performing per-line sync-A correlation to keep rows
+// aligned.
+func (d *APTDecoder) tryExtractLines() []APTLine {
 	var completed []APTLine
+	syncLen := len(d.syncPattern)
 
-	d.pixelBuf = append(d.pixelBuf, pixel)
-	d.lineOffset++
-
-	// Try sync detection when we have enough samples
-	if !d.syncLocked && len(d.pixelBuf) >= 64 {
-		d.trySync()
-	}
-
-	// If we have a full line, finalize it
-	if d.syncLocked && d.lineOffset >= LinePixels {
-		if line, ok := d.finalizeLine(); ok {
-			completed = append(completed, line)
+	for {
+		// We need at least one full line past the current start position
+		// plus the sync search window.
+		searchRange := 16
+		need := d.lineStart + LinePixels + searchRange + syncLen
+		if len(d.pixelStream) < need {
+			break
 		}
-	}
 
-	// If not locked and buffer is too long, flush a line anyway (best effort)
-	if !d.syncLocked && len(d.pixelBuf) >= LinePixels*2 {
-		// Reset and try again
-		d.pixelBuf = d.pixelBuf[len(d.pixelBuf)-LinePixels:]
-		d.lineOffset = LinePixels
-		if line, ok := d.finalizeLine(); ok {
-			completed = append(completed, line)
+		// Search for sync A around the expected position (one line after
+		// the current start).  This per-line re-alignment compensates for
+		// doppler shift and non-integer sample ratios that cause
+		// progressive row skew.
+		bestPos := d.lineStart + LinePixels
+		bestScore := d.syncScore(bestPos)
+
+		for offset := -searchRange; offset <= searchRange; offset++ {
+			if offset == 0 {
+				continue
+			}
+			pos := d.lineStart + LinePixels + offset
+			if pos < 0 || pos+syncLen > len(d.pixelStream) {
+				continue
+			}
+			score := d.syncScore(pos)
+			if score > bestScore {
+				bestScore = score
+				bestPos = pos
+			}
 		}
+
+		if !d.syncLocked {
+			// Before first lock, require a strong sync hit.  The
+			// threshold of 0.55 with a 32-sample pattern over a ±16
+			// search window (33 positions) keeps the false-positive
+			// rate negligible (≈0.3% per line for pure noise, since
+			// 1/√32 ≈ 0.18 is the noise correlation std-dev).
+			// Additionally require 2 consecutive hits before locking
+			// to further suppress noise-only "snow" images.
+			if bestScore < 0.55 {
+				d.syncStreak = 0
+				d.lineStart++
+				if d.lineStart > len(d.pixelStream)-LinePixels-syncLen {
+					d.pruneStream()
+				}
+				continue
+			}
+			d.syncStreak++
+			if d.syncStreak < 2 {
+				// First hit: advance to the candidate position but
+				// don't lock yet — wait for a second confirmation.
+				d.lineStart = bestPos
+				d.pruneStream()
+				continue
+			}
+			d.syncLocked = true
+			d.syncFound++
+		} else {
+			// Already locked: a very weak score means sync was lost
+			// (e.g. a fade).  Fall back to nominal spacing.
+			if bestScore < 0.15 {
+				bestPos = d.lineStart + LinePixels
+			} else {
+				d.syncFound++
+			}
+		}
+
+		// Track doppler: the difference between the found sync position
+		// and the expected position tells us the sample-rate error.
+		// A slow EMA adjusts the resampler to compensate.
+		offset := bestPos - (d.lineStart + LinePixels)
+		d.sppCorrection = d.sppCorrection*0.95 + float64(offset)*0.0001*d.samplesPerPixel
+
+		// Extract one line starting at lineStart.
+		line := d.finalizeLine(d.lineStart)
+		completed = append(completed, line)
+
+		// Advance to the sync position for the next line.
+		d.lineStart = bestPos
+		d.pruneStream()
 	}
 
 	return completed
 }
 
-// trySync attempts to find the sync A pattern in the pixel buffer.
-// If found, it realigns the buffer so that sync A starts at pixel 0.
-func (d *APTDecoder) trySync() {
-	buf := d.pixelBuf
-	refLen := len(d.syncRefA)
-	if len(buf) < refLen+10 {
-		return
+// syncScore computes the normalized correlation between the sync pattern and
+// the pixel stream at the given position.
+func (d *APTDecoder) syncScore(pos int) float64 {
+	syncLen := len(d.syncPattern)
+	if pos < 0 || pos+syncLen > len(d.pixelStream) {
+		return 0
 	}
 
-	// Search for sync A in the first portion of the buffer
-	bestCorr := -1e9
-	bestPos := -1
-
-	// Only search in a reasonable window to avoid excessive computation
-	searchEnd := len(buf) - refLen
-	if searchEnd > 100 {
-		searchEnd = 100
-	}
-
-	// Normalize the reference (zero mean)
 	var refMean float64
-	for _, v := range d.syncRefA {
+	for _, v := range d.syncPattern {
 		refMean += v
 	}
-	refMean /= float64(refLen)
+	refMean /= float64(syncLen)
 
-	for pos := 0; pos < searchEnd; pos++ {
-		// Compute correlation at this position
-		var corr, winMean float64
-		for i := 0; i < refLen; i++ {
-			winMean += buf[pos+i]
-		}
-		winMean /= float64(refLen)
+	var winMean float64
+	for i := range syncLen {
+		winMean += d.pixelStream[pos+i]
+	}
+	winMean /= float64(syncLen)
 
-		for i := 0; i < refLen; i++ {
-			corr += (d.syncRefA[i] - refMean) * (buf[pos+i] - winMean)
-		}
-
-		if corr > bestCorr {
-			bestCorr = corr
-			bestPos = pos
-		}
+	var corr, refNorm, winNorm float64
+	for i := 0; i < syncLen; i++ {
+		r := d.syncPattern[i] - refMean
+		w := d.pixelStream[pos+i] - winMean
+		corr += r * w
+		refNorm += r * r
+		winNorm += w * w
 	}
 
-	// Compute quality metric (normalized correlation)
-	var refNorm, winNorm float64
-	if bestPos >= 0 {
-		for i := range refLen {
-			refNorm += (d.syncRefA[i] - refMean) * (d.syncRefA[i] - refMean)
-		}
-		var winMeanForNorm float64
-		for i := range refLen {
-			winMeanForNorm += buf[bestPos+i]
-		}
-		winMeanForNorm /= float64(refLen)
-		for i := range refLen {
-			dv := buf[bestPos+i] - winMeanForNorm
-			winNorm += dv * dv
-		}
-		if refNorm > 0 && winNorm > 0 {
-			d.syncQuality = bestCorr / math.Sqrt(refNorm*winNorm)
-		} else {
-			d.syncQuality = 0
-		}
-	} else {
-		d.syncQuality = 0
+	if refNorm <= 0 || winNorm <= 0 {
+		return 0
 	}
-
-	// Accept sync if quality is above threshold
-	if d.syncQuality > 0.4 && bestPos >= 0 {
-		d.syncFound++
-		d.syncLocked = true
-		// Realign buffer: remove samples before sync
-		if bestPos > 0 {
-			d.pixelBuf = d.pixelBuf[bestPos:]
-			d.lineOffset = len(d.pixelBuf)
-		}
-	}
+	return corr / math.Sqrt(refNorm*winNorm)
 }
 
-// finalizeLine converts the current pixel buffer to a byte line and resets.
-func (d *APTDecoder) finalizeLine() (APTLine, bool) {
-	if len(d.pixelBuf) < LinePixels {
-		return APTLine{}, false
-	}
-
-	// Take exactly LinePixels samples
+// finalizeLine converts LinePixels worth of pixel data starting at the given
+// index into a byte line, updates the brightness reference, and stores the
+// line in the ring buffer.
+func (d *APTDecoder) finalizeLine(start int) APTLine {
 	line := make([]byte, LinePixels)
 
-	// Update the running brightness reference (peak with slow EMA decay) so
-	// every line is scaled by the same reference, preserving relative
-	// brightness across the image instead of stretching each line to 0..255.
 	var lineMax float64
 	for i := 0; i < LinePixels; i++ {
-		v := d.pixelBuf[i]
-		if v > lineMax {
-			lineMax = v
+		if start+i < len(d.pixelStream) {
+			v := d.pixelStream[start+i]
+			if v > lineMax {
+				lineMax = v
+			}
 		}
 	}
 	if lineMax > d.peakEnv {
@@ -291,8 +330,11 @@ func (d *APTDecoder) finalizeLine() (APTLine, bool) {
 		peak = 1
 	}
 
-	for i := 0; i < LinePixels; i++ {
-		v := d.pixelBuf[i] / peak
+	for i := range LinePixels {
+		var v float64
+		if start+i < len(d.pixelStream) {
+			v = d.pixelStream[start+i] / peak
+		}
 		if v < 0 {
 			v = 0
 		}
@@ -309,7 +351,6 @@ func (d *APTDecoder) finalizeLine() (APTLine, bool) {
 	d.lineCount++
 	d.linesDecoded++
 
-	// Store in image buffer (ring buffer)
 	if len(d.lines) < d.maxLines {
 		d.lines = append(d.lines, line)
 	} else {
@@ -317,21 +358,34 @@ func (d *APTDecoder) finalizeLine() (APTLine, bool) {
 		d.ringIdx = (d.ringIdx + 1) % d.maxLines
 	}
 
-	// Reset for next line
-	d.pixelBuf = d.pixelBuf[LinePixels:]
-	d.lineOffset = len(d.pixelBuf)
-
-	// Periodically try to re-sync (every 100 lines)
-	if d.lineCount%100 == 0 {
-		d.syncLocked = false
-	}
-
-	return aptLine, true
+	return aptLine
 }
 
-// Stats returns decoder statistics.
-func (d *APTDecoder) Stats() (linesDecoded, syncFound int) {
-	return d.linesDecoded, d.syncFound
+// pruneStream removes already-processed pixels from the front of the stream
+// to bound memory usage.  lineStart is adjusted accordingly.
+func (d *APTDecoder) pruneStream() {
+	if d.lineStart <= 0 {
+		return
+	}
+	margin := 64
+	if d.lineStart < margin {
+		return
+	}
+	cut := d.lineStart - margin
+	if cut <= 0 {
+		return
+	}
+	d.pixelStream = d.pixelStream[cut:]
+	d.lineStart -= cut
+}
+
+// Stats returns decoder statistics: decoded line count, sync detection
+// count, and the current 2.4 kHz subcarrier signal level (0–1 scale, EMA of
+// the envelope amplitude).  A near-zero signalLevel means no satellite
+// signal is being received (antenna/frequency/timing issue), while a high
+// signalLevel with sync=0 suggests a decoder problem.
+func (d *APTDecoder) Stats() (linesDecoded, syncFound int, signalLevel float64) {
+	return d.linesDecoded, d.syncFound, d.signalLevel
 }
 
 // GetImage returns the accumulated image as a 2D byte slice.
@@ -341,21 +395,24 @@ func (d *APTDecoder) GetImage() [][]byte {
 
 // Reset clears the decoder state and image buffer.
 func (d *APTDecoder) Reset() {
-	d.pixelBuf = d.pixelBuf[:0]
+	d.pixelStream = d.pixelStream[:0]
+	d.lineStart = 0
+	d.syncLocked = false
 	d.lineCount = 0
 	d.linesDecoded = 0
 	d.syncFound = 0
-	d.syncLocked = false
-	d.lineOffset = 0
+	d.sppCorrection = 0
+	d.signalLevel = 0
+	d.syncStreak = 0
+	d.phase = 0
+	d.prevSample = 0
+	d.peakEnv = 0
 	d.lines = d.lines[:0]
 	d.ringIdx = 0
-	d.peakEnv = 0
-	d.decimPhase = 0
-	d.decimAccum = 0
-	d.decimCount = 0
-	// Reset filter states
 	d.bpSubcarrier.z1 = 0
 	d.bpSubcarrier.z2 = 0
-	d.lpEnvelope.z1 = 0
-	d.lpEnvelope.z2 = 0
+	d.lpEnvelope1.z1 = 0
+	d.lpEnvelope1.z2 = 0
+	d.lpEnvelope2.z1 = 0
+	d.lpEnvelope2.z2 = 0
 }

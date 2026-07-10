@@ -950,10 +950,11 @@ func (s *Server) handleGetNOAASatellites(c echo.Context) error {
 
 // handleAPTStats returns APT decoder statistics.
 func (s *Server) handleAPTStats(c echo.Context) error {
-	lines, sync := s.receiver.GetAPTStats()
-	return c.JSON(http.StatusOK, map[string]int{
-		"lines": lines,
-		"sync":  sync,
+	lines, sync, signal := s.receiver.GetAPTStats()
+	return c.JSON(http.StatusOK, map[string]any{
+		"lines":       lines,
+		"sync":        sync,
+		"signalLevel": signal,
 	})
 }
 

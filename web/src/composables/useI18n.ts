@@ -95,6 +95,12 @@ const messages: Record<string, Record<string, string>> = {
     'noaa.save': '保存图像',
     'noaa.noImage': '暂无图像数据',
     'noaa.tip': '提示：选择卫星频率，确保增益调高或开启自动增益。需要 137 MHz 天线。卫星过境时间约 15 分钟。',
+    'noaa.signal': '信号',
+    'noaa.signalNone': '无',
+    'noaa.signalWeak': '弱',
+    'noaa.signalGood': '良',
+    'noaa.noSignal': '未检测到信号 — 请检查天线方向、频率是否正确，以及卫星是否正在过境。',
+    'noaa.noSync': '检测到信号但未同步 — 可能信号太弱或频率有偏差，尝试微调频率或提高增益。',
   },
 
   'en': {
@@ -183,6 +189,12 @@ const messages: Record<string, Record<string, string>> = {
     'noaa.save': 'Save Image',
     'noaa.noImage': 'No image data',
     'noaa.tip': 'Tip: Select a satellite frequency, ensure gain is high or auto. A 137 MHz antenna is required. Pass duration ~15 min.',
+    'noaa.signal': 'Signal',
+    'noaa.signalNone': 'None',
+    'noaa.signalWeak': 'Weak',
+    'noaa.signalGood': 'Good',
+    'noaa.noSignal': 'No signal detected — check antenna direction, frequency, and whether a satellite is passing.',
+    'noaa.noSync': 'Signal detected but no sync — signal may be too weak or frequency off. Try fine-tuning frequency or increasing gain.',
   },
 }
 
