@@ -210,6 +210,8 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	api.GET("/ws/aircraft", s.handleWSAircraft)
 	api.POST("/receiver-position", s.handleSetReceiverPosition)
 	api.GET("/aircraft", s.handleGetAircraft)
+	api.GET("/aircraft/history", s.handleGetAircraftHistory)
+	api.GET("/aircraft/all", s.handleGetAllAircraft)
 	api.GET("/adsb-stats", s.handleADSBStats)
 
 	// NOAA APT
@@ -899,6 +901,20 @@ func (s *Server) handleWSAircraft(c echo.Context) error {
 // handleGetAircraft returns the current list of tracked aircraft.
 func (s *Server) handleGetAircraft(c echo.Context) error {
 	aircraft := s.receiver.GetAircraft()
+	return c.JSON(http.StatusOK, map[string]any{"aircraft": aircraft})
+}
+
+// handleGetAircraftHistory returns all aircraft ever tracked (including
+// those no longer active), sorted by LastSeen descending.
+func (s *Server) handleGetAircraftHistory(c echo.Context) error {
+	aircraft := s.receiver.GetAircraftHistory()
+	return c.JSON(http.StatusOK, map[string]any{"aircraft": aircraft})
+}
+
+// handleGetAllAircraft returns both active and historical aircraft in a
+// single list. Active aircraft come first.
+func (s *Server) handleGetAllAircraft(c echo.Context) error {
+	aircraft := s.receiver.GetAllAircraft()
 	return c.JSON(http.StatusOK, map[string]any{"aircraft": aircraft})
 }
 

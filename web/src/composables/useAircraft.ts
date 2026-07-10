@@ -23,6 +23,10 @@ let refCount = 0
 const aircraft = ref<Aircraft[]>([])
 export const aircraftLoaded = ref(false)
 
+// History mode: when true, the UI shows all aircraft ever seen.
+export const showHistory = ref(false)
+const historyAircraft = ref<Aircraft[]>([])
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   ws = new WebSocket(`${proto}//${location.host}/api/ws/aircraft`)
@@ -32,6 +36,8 @@ function connect() {
       if (Array.isArray(data)) {
         aircraft.value = data
         aircraftLoaded.value = true
+        // If in history mode, also refresh history list so timestamps
+        // stay current.  The history list is polled via REST.
       }
     } catch (e) {
       // ignore
@@ -61,5 +67,5 @@ export function useAircraft() {
     }
   })
 
-  return { aircraft, aircraftLoaded }
+  return { aircraft, aircraftLoaded, showHistory, historyAircraft }
 }

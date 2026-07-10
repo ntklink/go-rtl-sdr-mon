@@ -20,6 +20,16 @@
       {{ t('adsb.tip') }}
     </div>
 
+    <div class="history-toggle">
+      <label class="toggle-label">
+        <input type="checkbox" v-model="showHistory" @change="onHistoryToggle" />
+        <span>{{ t('adsb.showHistory') }}</span>
+      </label>
+      <span class="history-count" v-if="showHistory">
+        ({{ displayAircraft.length }})
+      </span>
+    </div>
+
     <div class="control-group">
       <label>{{ t('adsb.rxPos') }}</label>
       <div class="rx-pos-row">
@@ -35,8 +45,8 @@
       <div v-if="geoError" class="geo-error">{{ geoError }}</div>
     </div>
 
-    <div v-if="aircraft.length === 0" class="no-data">
-      {{ t('adsb.noData') }}
+    <div v-if="displayAircraft.length === 0" class="no-data">
+      {{ showHistory ? t('adsb.noHistory') : t('adsb.noData') }}
     </div>
 
     <div v-else class="aircraft-table">
@@ -46,7 +56,8 @@
         <span class="col-spd">{{ t('adsb.speed') }}</span>
         <span class="col-trk">{{ t('adsb.track') }}</span>
       </div>
-      <div v-for="ac in sortedAircraft" :key="ac.icao" class="table-row" :class="{ selected: selectedICAO === ac.icao }"
+      <div v-for="ac in sortedAircraft" :key="ac.icao" class="table-row"
+        :class="{ selected: selectedICAO === ac.icao, inactive: showHistory && !isActive(ac) }"
         @click="selectAircraft(ac)">
         <span class="col-callsign">
           <span class="callsign-text">{{ ac.callsign || '----' }}</span>
@@ -67,7 +78,7 @@ import { useApi } from '../composables/useApi'
 import { useI18n } from '../composables/useI18n'
 import { useStatus, statusLoaded } from '../composables/useStatus'
 
-const { aircraft } = useAircraft()
+const { aircraft, showHistory, historyAircraft } = useAircraft()
 const api = useApi()
 const { t } = useI18n()
 const { status } = useStatus()
@@ -79,6 +90,37 @@ const geoLoading = ref(false)
 const geoError = ref('')
 const stats = ref<{ detected: number; valid: number; accepted: number; aircraft: number } | null>(null)
 let statsTimer: ReturnType<typeof setInterval> | null = null
+
+// The displayed list depends on whether history mode is toggled on.
+const displayAircraft = computed(() => {
+  return showHistory.value ? historyAircraft.value : aircraft.value
+})
+
+// Whether a given aircraft is currently active (seen in last 120 seconds).
+function isActive(ac: Aircraft): boolean {
+  if (!ac.lastSeen) return false
+  return Date.now() - ac.lastSeen < 120_000
+}
+
+// When history mode is on, poll the history endpoint every few seconds
+// to get fresh timestamps and any new aircraft.
+async function pollHistory() {
+  if (!showHistory.value) return
+  try {
+    const resp = await api.getAircraftHistory()
+    if (resp && Array.isArray(resp.aircraft)) {
+      historyAircraft.value = resp.aircraft
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function onHistoryToggle() {
+  if (showHistory.value) {
+    pollHistory()
+  }
+}
 
 async function pollStats() {
   try {
@@ -102,7 +144,11 @@ const emit = defineEmits<{
 }>()
 
 const sortedAircraft = computed(() => {
-  return [...aircraft.value].sort((a, b) => {
+  return [...displayAircraft.value].sort((a, b) => {
+    // In history mode, sort by LastSeen descending (most recent first).
+    if (showHistory.value) {
+      return (b.lastSeen || 0) - (a.lastSeen || 0)
+    }
     if (a.callsign && !b.callsign) return -1
     if (!a.callsign && b.callsign) return 1
     return a.callsign.localeCompare(b.callsign)
@@ -165,9 +211,14 @@ onMounted(() => {
     rxLat.value = status.value.RxLat
     rxLon.value = status.value.RxLon
   }
-  // Poll ADS-B decoder stats every 2 seconds
+  // Poll ADS-B decoder stats every 2 seconds, and history if enabled
   pollStats()
-  statsTimer = setInterval(pollStats, 2000)
+  statsTimer = setInterval(() => {
+    pollStats()
+    if (showHistory.value) {
+      pollHistory()
+    }
+  }, 2000)
 })
 
 onUnmounted(() => {
@@ -223,6 +274,35 @@ onUnmounted(() => {
   background: #2a2a10;
   border-radius: 4px;
   line-height: 1.4;
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: #aaa;
+}
+
+.toggle-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.history-count {
+  color: #666;
+  font-size: 11px;
+}
+
+.table-row.inactive {
+  opacity: 0.5;
 }
 
 .rx-pos-row {

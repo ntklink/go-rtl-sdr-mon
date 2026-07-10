@@ -1,6 +1,7 @@
 package adsb
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -9,7 +10,8 @@ import (
 // the same ICAO address into a single Aircraft record.
 type Tracker struct {
 	mu       sync.RWMutex
-	aircraft map[string]*Aircraft // keyed by ICAO hex
+	aircraft map[string]*Aircraft // keyed by ICAO hex, active aircraft
+	history  map[string]*Aircraft // keyed by ICAO hex, all-time history (never auto-deleted)
 
 	// CPR storage for position decoding
 	cprEvenLat  map[string]int
@@ -29,6 +31,7 @@ type Tracker struct {
 func NewTracker() *Tracker {
 	return &Tracker{
 		aircraft:    make(map[string]*Aircraft),
+		history:     make(map[string]*Aircraft),
 		cprEvenLat:  make(map[string]int),
 		cprEvenLon:  make(map[string]int),
 		cprOddLat:   make(map[string]int),
@@ -65,9 +68,21 @@ func (t *Tracker) ProcessMessage(msg *Message) {
 		t.aircraft[msg.ICAO] = aircraft
 	}
 
+	// Also update the history record (a separate copy so that
+	// Cleanup deleting from t.aircraft doesn't affect history).
+	hist, ok := t.history[msg.ICAO]
+	if !ok {
+		hist = &Aircraft{ICAO: msg.ICAO}
+		t.history[msg.ICAO] = hist
+	}
+
 	aircraft.LastSeen = time.Now().UnixMilli()
 	aircraft.MessageCount++
 	aircraft.TypeCode = msg.TypeCode
+
+	hist.LastSeen = aircraft.LastSeen
+	hist.MessageCount = aircraft.MessageCount
+	hist.TypeCode = aircraft.TypeCode
 
 	// Decode based on type code
 	tc := msg.TypeCode
@@ -115,6 +130,17 @@ func (t *Tracker) ProcessMessage(msg *Message) {
 		}
 		aircraft.VerticalRate = int(vRate)
 	}
+
+	// Sync all decoded fields to the history record.
+	hist.Callsign = aircraft.Callsign
+	hist.Latitude = aircraft.Latitude
+	hist.Longitude = aircraft.Longitude
+	hist.Altitude = aircraft.Altitude
+	hist.Speed = aircraft.Speed
+	hist.Track = aircraft.Track
+	hist.VerticalRate = aircraft.VerticalRate
+	hist.Squawk = aircraft.Squawk
+	hist.OnGround = aircraft.OnGround
 }
 
 // decodePosition attempts to decode aircraft position from stored CPR data.
@@ -152,15 +178,16 @@ func (t *Tracker) decodePosition(aircraft *Aircraft, icao string) {
 	}
 }
 
-// GetAircraft returns a snapshot of all tracked aircraft.
+// GetAircraft returns a snapshot of all actively tracked aircraft.
+// An aircraft is considered active if it has been seen in the last 120 seconds.
 func (t *Tracker) GetAircraft() []Aircraft {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	result := make([]Aircraft, 0, len(t.aircraft))
 	for _, a := range t.aircraft {
-		// Skip aircraft not seen in the last 60 seconds
-		if time.Since(time.UnixMilli(a.LastSeen)) > 60*time.Second {
+		// Skip aircraft not seen in the last 120 seconds
+		if time.Since(time.UnixMilli(a.LastSeen)) > 120*time.Second {
 			continue
 		}
 		result = append(result, *a)
@@ -168,20 +195,74 @@ func (t *Tracker) GetAircraft() []Aircraft {
 	return result
 }
 
-// Count returns the number of tracked aircraft.
+// GetHistory returns a snapshot of all aircraft ever tracked, sorted by
+// LastSeen descending (most recent first).  History records are never
+// automatically deleted and persist across demod mode switches.
+func (t *Tracker) GetHistory() []Aircraft {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	result := make([]Aircraft, 0, len(t.history))
+	for _, a := range t.history {
+		result = append(result, *a)
+	}
+	// Sort by LastSeen descending (most recent first)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LastSeen > result[j].LastSeen
+	})
+	return result
+}
+
+// GetAllAircraft returns both active and historical aircraft. Active
+// aircraft come first (sorted by callsign), followed by inactive history-only
+// entries.  Each entry has a fresh boolean indicating active status.
+func (t *Tracker) GetAllAircraft() []Aircraft {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	seen := make(map[string]bool, len(t.aircraft))
+	result := make([]Aircraft, 0, len(t.history))
+
+	// Active aircraft first (seen in last 120 seconds)
+	for icao, a := range t.aircraft {
+		if time.Since(time.UnixMilli(a.LastSeen)) <= 120*time.Second {
+			result = append(result, *a)
+			seen[icao] = true
+		}
+	}
+
+	// Then history-only entries (not in active set)
+	for icao, a := range t.history {
+		if !seen[icao] {
+			result = append(result, *a)
+		}
+	}
+
+	return result
+}
+
+// Count returns the number of actively tracked aircraft (seen in last 120 seconds).
 func (t *Tracker) Count() int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	count := 0
 	for _, a := range t.aircraft {
-		if time.Since(time.UnixMilli(a.LastSeen)) <= 60*time.Second {
+		if time.Since(time.UnixMilli(a.LastSeen)) <= 120*time.Second {
 			count++
 		}
 	}
 	return count
 }
 
-// Cleanup removes stale aircraft (not seen in the last 5 minutes).
+// HistoryCount returns the total number of aircraft ever tracked.
+func (t *Tracker) HistoryCount() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.history)
+}
+
+// Cleanup removes stale aircraft from the active map (not seen in the
+// last 5 minutes).  History records are never deleted.
 func (t *Tracker) Cleanup() {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -794,6 +794,21 @@ func (r *Receiver) GetAircraft() []adsb.Aircraft {
 	return r.adsbTracker.GetAircraft()
 }
 
+// GetAircraftHistory returns all aircraft ever tracked (including those
+// no longer active), sorted by LastSeen descending.
+func (r *Receiver) GetAircraftHistory() []adsb.Aircraft {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.adsbTracker.GetHistory()
+}
+
+// GetAllAircraft returns both active and historical aircraft.
+func (r *Receiver) GetAllAircraft() []adsb.Aircraft {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.adsbTracker.GetAllAircraft()
+}
+
 // --- Control methods ---
 
 // SetCenterFreq sets the center frequency.
