@@ -1,6 +1,7 @@
 package adsb
 
 import (
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -122,13 +123,15 @@ func (t *Tracker) ProcessMessage(msg *Message) {
 	// Type code 19: Airborne velocity
 	if tc == 19 {
 		speed, track, vRate := decodeVelocity(msg.ME)
-		if speed > 0 {
+		if !math.IsNaN(speed) {
 			aircraft.Speed = speed
 		}
-		if track > 0 {
+		if !math.IsNaN(track) {
 			aircraft.Track = track
 		}
-		aircraft.VerticalRate = int(vRate)
+		if !math.IsNaN(vRate) {
+			aircraft.VerticalRate = int(vRate)
+		}
 	}
 
 	// Sync all decoded fields to the history record.

@@ -230,9 +230,9 @@ func (d *Decoder) detectPreambleGeneric(mags []float64, pos, spb int) bool {
 	}
 
 	var usMags [8]float64
-	for us := 0; us < 8; us++ {
+	for us := range 8 {
 		var s float64
-		for j := 0; j < spb; j++ {
+		for j := range spb {
 			s += mags[pos+us*spb+j]
 		}
 		usMags[us] = s / float64(spb)
@@ -286,19 +286,16 @@ func (d *Decoder) decodeBits(mags []float64, start, spb int) []byte {
 	// to average ≈ 1.0, so typical signal values are O(1).
 	const weakThreshold = 0.1
 
-	for bit := 0; bit < 112; bit++ {
+	for bit := range 112 {
 		pos := start + bit*spb
 		if pos+spb > len(mags) {
 			return nil
 		}
 
-		half := spb / 2
-		if half < 1 {
-			half = 1
-		}
+		half := max(spb/2, 1)
 
 		var firstHalf, secondHalf float64
-		for j := 0; j < half; j++ {
+		for j := range half {
 			firstHalf += mags[pos+j]
 		}
 		firstHalf /= float64(half)

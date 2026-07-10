@@ -40,21 +40,21 @@ func decodeCallsign(me []byte) string {
 	if len(me) < 7 {
 		return ""
 	}
-	const charset = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ#####_###############0123456789######"
+	const charset = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######"
 	var callsign [8]byte
 
 	// The callsign is encoded in 48 bits (6 bytes) starting at bit 8 of ME
 	// Each character is 6 bits
 	bits := make([]int, 48)
-	for i := 0; i < 6; i++ {
-		for j := 0; j < 8; j++ {
+	for i := range 6 {
+		for j := range 8 {
 			bits[i*8+j] = int((me[1+i] >> (7 - j)) & 1)
 		}
 	}
 	// Reinterpret as 8 x 6-bit chars
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		val := 0
-		for j := 0; j < 6; j++ {
+		for j := range 6 {
 			val = val<<1 | bits[i*6+j]
 		}
 		if val < len(charset) {
@@ -130,9 +130,15 @@ func decodeAirbornePosition(me []byte) (lat, lon int, isOdd bool) {
 
 // decodeVelocity extracts speed, track/heading, vertical rate from
 // an airborne velocity message (type code 19).
+// Invalid/absent fields are returned as NaN so callers can distinguish
+// a genuine zero (e.g. a due-north track) from "no information".
 func decodeVelocity(me []byte) (speed, track, vRate float64) {
+	speed = math.NaN()
+	track = math.NaN()
+	vRate = math.NaN()
+
 	if len(me) < 7 {
-		return 0, 0, 0
+		return
 	}
 
 	// Subtype (ST): bits 6-8 of ME → ME[0] & 0x07
@@ -142,52 +148,63 @@ func decodeVelocity(me []byte) (speed, track, vRate float64) {
 	switch st {
 	case 1, 2:
 		// Ground speed (subtypes 1, 2)
-		// EW velocity: bits 14-23 (10 bits, signed), sign at bit 14
-		// NS velocity: bits 25-34 (10 bits, signed), sign at bit 25
+		// EW velocity: sign at bit 14, value at bits 15-24 (10 bits)
 		ewSign := (me[1] >> 2) & 1
-		ewVel := int(me[1]&0x03)<<8 | int(me[2])
-		ewVel--
+		ewRaw := int(me[1]&0x03)<<8 | int(me[2])
+		// NS velocity: sign at bit 25, value at bits 26-35 (10 bits)
+		nsSign := (me[3] >> 7) & 1
+		nsRaw := int(me[3]&0x7F)<<3 | int(me[4]>>5)
+
+		// A raw value of 0 means "no information".
+		if ewRaw == 0 || nsRaw == 0 {
+			break
+		}
+
+		ewVel := ewRaw - 1
 		if ewSign == 1 {
 			ewVel = -ewVel
 		}
-
-		nsSign := (me[3] >> 2) & 1
-		nsVel := int(me[3]&0x03)<<8 | int(me[4])
-		nsVel--
+		nsVel := nsRaw - 1
 		if nsSign == 1 {
 			nsVel = -nsVel
 		}
 
-		speed = math.Sqrt(float64(ewVel*ewVel + nsVel*nsVel))
+		scale := 1
+		if st == 2 {
+			scale = 4 // Supersonic
+		}
+
+		speed = math.Sqrt(float64(ewVel*ewVel+nsVel*nsVel)) * float64(scale)
 		track = math.Mod(math.Atan2(float64(ewVel), float64(nsVel))*180/math.Pi+360, 360)
 
-		if st == 2 {
-			// Supersonic, scale by 4
-			speed *= 4
-		}
 	case 3, 4:
 		// Airspeed (subtypes 3, 4)
-		// Heading: bits 15-24 (10 bits), bit 14 is status (HST)
+		// Heading: status at bit 14, value at bits 15-24 (10 bits)
 		headStatus := (me[1] >> 2) & 1
 		if headStatus == 1 {
 			track = float64(int(me[1]&0x03)<<8|int(me[2])) * 360.0 / 1024.0
 		}
-		// Airspeed: bits 26-35 (10 bits)
-		// Bit 26 indicates IAS (0) or TAS (1)
-		speed = float64(int(me[3]&0x03)<<8 | int(me[4]))
-		if st == 4 {
-			speed *= 4
+		// Airspeed: value at bits 26-35 (10 bits); bit 25 selects IAS (0) / TAS (1)
+		aspRaw := int(me[3]&0x7F)<<3 | int(me[4]>>5)
+		if aspRaw > 0 {
+			speed = float64(aspRaw - 1)
+			if st == 4 {
+				speed *= 4
+			}
 		}
 	}
 
-	// Vertical rate: bits 37-46 (10 bits), sign at bit 37, VR = (value - 1) * 64 ft/min
-	vrSign := (me[4] >> 2) & 1
-	vrRaw := int(me[4]&0x03)<<7 | int(me[5]>>1)
-	vrRaw--
-	if vrSign == 1 {
-		vRate = -float64(vrRaw) * 64
-	} else {
-		vRate = float64(vrRaw) * 64
+	// Vertical rate: source at bit 36, sign at bit 37, value at bits 38-46 (9 bits).
+	// VR = (value - 1) * 64 ft/min; a raw value of 0 means "no information".
+	vrSign := (me[4] >> 3) & 1
+	vrRaw := int(me[4]&0x07)<<6 | int(me[5]>>2)
+	if vrRaw > 0 {
+		vrRaw--
+		if vrSign == 1 {
+			vRate = -float64(vrRaw) * 64
+		} else {
+			vRate = float64(vrRaw) * 64
+		}
 	}
 
 	return speed, track, vRate

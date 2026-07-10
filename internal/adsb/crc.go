@@ -17,7 +17,7 @@ const crcGenerator = 0xFFF409 // 24-bit polynomial
 func init() {
 	for i := range 256 {
 		crc := uint32(i) << 16
-		for j := 0; j < 8; j++ {
+		for range 8 {
 			if crc&0x800000 != 0 {
 				crc = (crc << 1) ^ crcGenerator
 			} else {
@@ -58,9 +58,11 @@ func fixSingleBitError(msg []byte) ([]byte, bool) {
 		return msg, false
 	}
 
-	// Try flipping each payload bit (first 88 bits = 11 bytes) and check CRC.
-	for byteIdx := range 11 {
-		for bitIdx := 0; bitIdx < 8; bitIdx++ {
+	// Try flipping each bit (all 112 bits = 14 bytes, including parity) and
+	// check CRC. A single-bit error in the parity leaves the payload intact,
+	// so those messages must be correctable too.
+	for byteIdx := range 14 {
+		for bitIdx := range 8 {
 			fixed := make([]byte, len(msg))
 			copy(fixed, msg)
 			fixed[byteIdx] ^= 1 << (7 - bitIdx)
