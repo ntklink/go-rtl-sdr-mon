@@ -1,56 +1,53 @@
 <template>
   <div class="frequency-control">
-    <div class="freq-display">
-      <span class="freq-value">{{ formattedFreq }}</span>
-      <span class="freq-unit">{{ freqUnit }}</span>
-    </div>
-    <div class="freq-input-group">
-      <input v-model="inputFreq" type="number" class="freq-input" placeholder="Hz" @keyup.enter="applyFreq" />
-      <SelectRoot v-model="freqUnitSelect">
-        <SelectTrigger class="freq-unit-trigger reka-select-trigger">
-          <span class="select-display">{{ freqUnitSelect }}</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </SelectTrigger>
-        <SelectPortal>
-          <SelectContent class="reka-select-content" position="popper" :side-offset="4">
-            <SelectItem value="Hz" class="reka-select-item">Hz</SelectItem>
-            <SelectItem value="kHz" class="reka-select-item">kHz</SelectItem>
-            <SelectItem value="MHz" class="reka-select-item">MHz</SelectItem>
-          </SelectContent>
-        </SelectPortal>
-      </SelectRoot>
-      <button @click="applyFreq" class="btn-apply">{{ t('top.set') }}</button>
-    </div>
-    <div class="freq-step-buttons">
-      <button @click="stepFreq(-100000)">-100k</button>
-      <button @click="stepFreq(-10000)">-10k</button>
-      <button @click="stepFreq(-1000)">-1k</button>
-      <button @click="stepFreq(1000)">+1k</button>
-      <button @click="stepFreq(10000)">+10k</button>
-      <button @click="stepFreq(100000)">+100k</button>
+    <div class="freq-display" @wheel.prevent="onWheel" :title="t('freq.scrollHint')">
+      <input v-if="editing" ref="editInput" v-model="inputFreq" type="text" class="freq-edit-input"
+        @keyup.enter="applyFreq" @keyup.esc="cancelEdit" @blur="applyFreq" @wheel.stop.prevent />
+      <span v-else class="freq-value" @click="startEdit" :title="t('freq.clickEdit')">{{ formattedFreq }}</span>
+      <button class="freq-unit-btn" @click="cycleUnit" :title="t('freq.cycleUnit')">{{ freqUnit }}</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { SelectRoot, SelectTrigger, SelectContent, SelectItem, SelectPortal } from 'reka-ui'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useI18n } from '../composables/useI18n'
 
 const { t } = useI18n()
 
 const props = defineProps<{
   frequency: number
+  demod?: string
 }>()
 
 const emit = defineEmits<{
   'update:frequency': [value: number]
 }>()
 
+const UNITS = ['Hz', 'kHz', 'MHz'] as const
+type Unit = typeof UNITS[number]
+
 const inputFreq = ref('')
-const freqUnitSelect = ref('Hz')
+const freqUnitSelect = ref<Unit>('MHz')
+const editing = ref(false)
+const editInput = ref<HTMLInputElement | null>(null)
+
+// Maps demod mode to the most natural display unit.
+function defaultUnitForDemod(demod: string | undefined): Unit {
+  if (!demod) return 'MHz'
+  // VHF/UHF modes — frequencies typically in MHz
+  if (['NFM', 'WFM', 'WFM-Stereo', 'WFM-OIRT', 'ADS-B', 'NOAA'].includes(demod)) return 'MHz'
+  // AM/SSB/CW — AM broadcast (kHz) and HF bands read naturally in kHz
+  if (['AM', 'AM-Sync', 'LSB', 'USB', 'CW-L', 'CW-U'].includes(demod)) return 'kHz'
+  return 'MHz'
+}
+
+// Auto-switch unit when demod changes (does not override while editing).
+watch(() => props.demod, (d) => {
+  if (editing.value) return
+  const u = defaultUnitForDemod(d)
+  if (u !== freqUnitSelect.value) freqUnitSelect.value = u
+}, { immediate: true })
 
 const freqUnit = computed(() => freqUnitSelect.value)
 
@@ -63,22 +60,50 @@ const formattedFreq = computed(() => {
   }
 })
 
+function startEdit() {
+  inputFreq.value = formattedFreq.value
+  editing.value = true
+  nextTick(() => {
+    editInput.value?.focus()
+    editInput.value?.select()
+  })
+}
+
 function applyFreq() {
+  if (!editing.value) return
+  editing.value = false
   const val = parseFloat(inputFreq.value)
   if (isNaN(val)) return
   let hz = val
   switch (freqUnitSelect.value) {
     case 'kHz': hz = val * 1000; break
-    case 'MHz': hz = val * 1000000; break
+    case 'MHz': hz = val * 1_000_000; break
   }
-  hz = Math.max(0, Math.min(2200000000, Math.round(hz)))
-  emit('update:frequency', hz)
-  inputFreq.value = ''
+  hz = Math.max(0, Math.min(2_200_000_000, Math.round(hz)))
+  if (hz !== props.frequency) emit('update:frequency', hz)
 }
 
-function stepFreq(delta: number) {
-  const newFreq = Math.max(0, Math.min(2200000000, props.frequency + delta))
-  emit('update:frequency', newFreq)
+function cancelEdit() {
+  editing.value = false
+}
+
+function cycleUnit() {
+  if (editing.value) return
+  const idx = UNITS.indexOf(freqUnitSelect.value)
+  freqUnitSelect.value = UNITS[(idx + 1) % UNITS.length]
+}
+
+// Mouse-wheel tuning: Shift = 10× larger step. Step scales with the active unit.
+function onWheel(e: WheelEvent) {
+  if (editing.value) return
+  let step = 100
+  switch (freqUnitSelect.value) {
+    case 'kHz': step = 1_000; break
+    case 'MHz': step = 100_000; break
+  }
+  if (e.shiftKey) step *= 10
+  const newFreq = Math.max(0, Math.min(2_200_000_000, props.frequency + (e.deltaY < 0 ? step : -step)))
+  if (newFreq !== props.frequency) emit('update:frequency', newFreq)
 }
 </script>
 
@@ -86,76 +111,55 @@ function stepFreq(delta: number) {
 .frequency-control {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 8px 16px;
   background: #111;
+  margin-left: auto;
 }
 
 .freq-display {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  color: #00ff88;
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  cursor: pointer;
+  user-select: none;
+  min-width: 200px;
+}
+
+.freq-value {
+  font-size: 28px;
+}
+
+.freq-edit-input {
   font-family: 'Courier New', monospace;
   font-size: 28px;
   font-weight: bold;
   color: #00ff88;
-  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
-  min-width: 200px;
-}
-
-.freq-unit {
-  font-size: 14px;
-  color: #666;
-  margin-left: 4px;
-}
-
-.freq-input-group {
-  display: flex;
-  gap: 4px;
-}
-
-.freq-input {
-  width: 120px;
-  padding: 4px 8px;
-  background: #1a1a2e;
-  border: 1px solid #333;
-  color: #fff;
-  border-radius: 3px;
-  font-size: 13px;
-}
-
-.freq-unit-trigger {
-  width: auto;
-  min-width: 70px;
-}
-
-.btn-apply {
-  padding: 4px 12px;
-  background: #0066cc;
+  background: transparent;
   border: none;
-  color: #fff;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 13px;
+  border-bottom: 1px solid #00ff88;
+  outline: none;
+  width: 180px;
+  padding: 0;
 }
 
-.btn-apply:hover {
-  background: #0080ff;
-}
-
-.freq-step-buttons {
-  display: flex;
-  gap: 4px;
-}
-
-.freq-step-buttons button {
-  padding: 4px 8px;
-  background: #222;
+.freq-unit-btn {
+  font-size: 14px;
+  color: #888;
+  background: transparent;
   border: 1px solid #333;
-  color: #ccc;
   border-radius: 3px;
+  padding: 2px 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-family: inherit;
 }
 
-.freq-step-buttons button:hover {
-  background: #333;
+.freq-unit-btn:hover {
+  color: #00ff88;
+  border-color: #00ff88;
 }
 </style>

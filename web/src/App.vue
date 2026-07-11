@@ -4,7 +4,8 @@
     <div class="top-bar">
       <div class="top-left">
         <DeviceSelector />
-        <FrequencyControl :frequency="status.CenterFreq" @update:frequency="setFrequency" />
+        <FrequencyControl :frequency="status.CenterFreq" :demod="status.Demod"
+          @update:frequency="setFrequency" />
       </div>
       <div class="top-right">
         <div class="status-bar">

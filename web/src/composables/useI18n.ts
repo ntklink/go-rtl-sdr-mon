@@ -52,6 +52,9 @@ const messages: Record<string, Record<string, string>> = {
 
     // Frequency control
     'freq.unit': 'Hz',
+    'freq.clickEdit': '点击编辑频率',
+    'freq.cycleUnit': '切换单位',
+    'freq.scrollHint': '滚轮调谐（Shift 加大步进）',
 
     // Device selector
     'device.select': '选择设备...',
@@ -147,6 +150,9 @@ const messages: Record<string, Record<string, string>> = {
     'audio.stopped': 'Stopped',
 
     'freq.unit': 'Hz',
+    'freq.clickEdit': 'Click to edit frequency',
+    'freq.cycleUnit': 'Cycle unit',
+    'freq.scrollHint': 'Scroll to tune (Shift for larger step)',
 
     'device.select': 'Select device...',
     'device.refresh': 'Refresh device list',
