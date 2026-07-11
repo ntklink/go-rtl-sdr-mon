@@ -85,11 +85,6 @@ type APTDecoder struct {
 	// Consecutive sync hits before locking
 	syncStreak int
 
-	// Image storage
-	lines    [][]byte
-	maxLines int
-	ringIdx  int
-
 	// Brightness reference (slow peak tracker for consistent scaling)
 	peakEnv float64
 
@@ -104,7 +99,6 @@ func NewAPTDecoder(sampleRate float64) *APTDecoder {
 	d := &APTDecoder{
 		sampleRate:      sampleRate,
 		samplesPerPixel: sampleRate / PixelRate,
-		maxLines:        2000,
 	}
 
 	// DC-removal lowpass at ~5 kHz.  This passes the 2.4 kHz carrier and
@@ -358,13 +352,6 @@ func (d *APTDecoder) finalizeLine(start int) APTLine {
 	d.lineCount++
 	d.linesDecoded++
 
-	if len(d.lines) < d.maxLines {
-		d.lines = append(d.lines, line)
-	} else {
-		d.lines[d.ringIdx] = line
-		d.ringIdx = (d.ringIdx + 1) % d.maxLines
-	}
-
 	return aptLine
 }
 
@@ -395,11 +382,6 @@ func (d *APTDecoder) Stats() (linesDecoded, syncFound int, signalLevel float64) 
 	return d.linesDecoded, d.syncFound, d.signalLevel
 }
 
-// GetImage returns the accumulated image as a 2D byte slice.
-func (d *APTDecoder) GetImage() [][]byte {
-	return d.lines
-}
-
 // Reset clears the decoder state and image buffer.
 func (d *APTDecoder) Reset() {
 	d.pixelStream = d.pixelStream[:0]
@@ -415,8 +397,6 @@ func (d *APTDecoder) Reset() {
 	d.prevRaw = 0
 	d.prevEnv = 0
 	d.peakEnv = 0
-	d.lines = d.lines[:0]
-	d.ringIdx = 0
 	d.lpDcRemoval.z1 = 0
 	d.lpDcRemoval.z2 = 0
 	d.lpEnvelope1.z1 = 0

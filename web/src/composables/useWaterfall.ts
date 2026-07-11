@@ -69,6 +69,16 @@ export function useWaterfall() {
   let waterfallCtx: CanvasRenderingContext2D | null = null
   let reconnectTimer: number | null = null
   let rafId: number | null = null
+  // Set when a new FFT frame arrives, cleared after drawSpectrum runs, so
+  // the rAF loop skips redrawing identical frames when the FFT rate (often
+  // configured well below 60fps) is slower than the display refresh rate.
+  let dirty = false
+  // Last-drawn canvas dimensions. A resize updates the canvas width/height
+  // attributes (clearing the bitmap), so the loop must also redraw on a
+  // dimension change — otherwise the spectrum stays blank until the next
+  // FFT frame, which at low FFT rates (1fps) is a visible gap.
+  let lastW = 0
+  let lastH = 0
 
   function setCanvases(spectrum: HTMLCanvasElement, waterfall: HTMLCanvasElement) {
     canvas = spectrum
@@ -167,6 +177,13 @@ export function useWaterfall() {
 
   function loop() {
     rafId = requestAnimationFrame(loop)
+    const resized = canvas !== null && (canvas.width !== lastW || canvas.height !== lastH)
+    if (!dirty && !resized) return
+    dirty = false
+    if (canvas) {
+      lastW = canvas.width
+      lastH = canvas.height
+    }
     drawSpectrum()
   }
 
@@ -198,6 +215,7 @@ export function useWaterfall() {
         arr[i] = buf.getFloat32(i * 4, true)
       }
       fftData.value = arr
+      dirty = true
       // Advance the waterfall one row per FFT frame.
       drawWaterfallRow(arr)
     }

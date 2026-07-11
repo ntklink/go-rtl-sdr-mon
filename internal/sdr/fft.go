@@ -15,6 +15,13 @@ type SpectrumFFT struct {
 	maxMag   []float64 // max-hold buffer
 	maxDecay float64   // max-hold decay rate (dB per second)
 	lastTime float64   // timestamp of last compute (for decay calc)
+
+	// paddedBuf/windowedBuf are scratch space reused across Compute calls;
+	// unlike the returned magnitude slice (broadcast to multiple slow
+	// WebSocket subscribers and so kept a fresh allocation per call), these
+	// never leave this function, so reusing them is safe.
+	paddedBuf   []complex128
+	windowedBuf []complex128
 }
 
 // NewSpectrumFFT creates a new FFT processor with the given size.
@@ -74,21 +81,36 @@ func (f *SpectrumFFT) Compute(samples []complex128) []float32 {
 	n := f.size
 	if len(samples) < n {
 		// pad with zeros
-		padded := make([]complex128, n)
+		if cap(f.paddedBuf) < n {
+			f.paddedBuf = make([]complex128, n)
+		}
+		padded := f.paddedBuf[:n]
+		for i := len(samples); i < n; i++ {
+			padded[i] = 0
+		}
 		copy(padded, samples)
 		samples = padded
+		f.paddedBuf = padded
 	}
 
 	// Apply window and take first n samples
-	windowed := make([]complex128, n)
+	if cap(f.windowedBuf) < n {
+		f.windowedBuf = make([]complex128, n)
+	}
+	windowed := f.windowedBuf[:n]
 	for i := 0; i < n; i++ {
 		windowed[i] = complex(real(samples[i])*f.window[i], imag(samples[i])*f.window[i])
 	}
+	f.windowedBuf = windowed
 
 	// Compute FFT (complex FFT using radix-2 Cooley-Tukey)
 	coeffs := fftComplex(windowed)
 
-	// Compute magnitude in dBFS, with fftshift
+	// Compute magnitude in dBFS, with fftshift.
+	// out is broadcast by reference to every connected FFT WebSocket
+	// subscriber; a slow client may still be reading a prior call's out
+	// when the next block arrives, so this one must stay freshly
+	// allocated rather than reused.
 	out := make([]float32, n)
 	half := n / 2
 	norm := 1.0 / float64(n)

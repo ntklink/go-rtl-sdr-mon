@@ -7,12 +7,18 @@ import (
 	"time"
 )
 
+// maxHistoryEntries caps how many aircraft the history map retains. Without
+// a cap, a receiver running for weeks near busy airspace accumulates one
+// entry per unique ICAO ever seen, indefinitely. When the cap is exceeded,
+// the least-recently-seen entries are evicted first.
+const maxHistoryEntries = 5000
+
 // Tracker maintains a list of tracked aircraft, merging messages from
 // the same ICAO address into a single Aircraft record.
 type Tracker struct {
 	mu       sync.RWMutex
 	aircraft map[string]*Aircraft // keyed by ICAO hex, active aircraft
-	history  map[string]*Aircraft // keyed by ICAO hex, all-time history (never auto-deleted)
+	history  map[string]*Aircraft // keyed by ICAO hex, all-time history (capped, see maxHistoryEntries)
 
 	// CPR storage for position decoding
 	cprEvenLat  map[string]int
@@ -200,9 +206,10 @@ func (t *Tracker) GetAircraft() []Aircraft {
 	return result
 }
 
-// GetHistory returns a snapshot of all aircraft ever tracked, sorted by
-// LastSeen descending (most recent first).  History records are never
-// automatically deleted and persist across demod mode switches.
+// GetHistory returns a snapshot of all aircraft ever tracked (up to
+// maxHistoryEntries), sorted by LastSeen descending (most recent first).
+// History records persist across demod mode switches and are only removed
+// by the maxHistoryEntries cap in Cleanup, oldest-seen first.
 func (t *Tracker) GetHistory() []Aircraft {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -267,7 +274,8 @@ func (t *Tracker) HistoryCount() int {
 }
 
 // Cleanup removes stale aircraft from the active map (not seen in the
-// last 5 minutes).  History records are never deleted.
+// last 5 minutes), and trims history down to maxHistoryEntries by evicting
+// the least-recently-seen entries once the cap is exceeded.
 func (t *Tracker) Cleanup() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -281,6 +289,23 @@ func (t *Tracker) Cleanup() {
 			delete(t.cprOddLon, icao)
 			delete(t.cprEvenTime, icao)
 			delete(t.cprOddTime, icao)
+		}
+	}
+
+	if len(t.history) > maxHistoryEntries {
+		type entry struct {
+			icao     string
+			lastSeen int64
+		}
+		entries := make([]entry, 0, len(t.history))
+		for icao, a := range t.history {
+			entries = append(entries, entry{icao, a.LastSeen})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].lastSeen < entries[j].lastSeen
+		})
+		for _, e := range entries[:len(entries)-maxHistoryEntries] {
+			delete(t.history, e.icao)
 		}
 	}
 }

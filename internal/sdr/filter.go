@@ -5,29 +5,49 @@ import (
 )
 
 // FIRFilter is a real-valued FIR filter.
+//
+// The delay line is a mirrored double-length ring buffer: each incoming
+// sample is written to both buffer[pos] and buffer[pos+n], so the most
+// recent n samples are always readable as one contiguous, in-order slice
+// (buffer[pos:pos+n]) without a per-tap modulo or wraparound check. taps is
+// stored reversed (newest-first) at construction so Filter is a plain
+// contiguous dot product.
 type FIRFilter struct {
-	taps   []float64
-	buffer []float64
-	idx    int
+	origTaps []float64 // original order, for Taps()
+	taps     []float64 // reversed, paired with buffer[pos:pos+n]
+	buffer   []float64 // length 2*n, mirrored
+	n        int
+	pos      int
 }
 
 // NewFIRFilter creates a new FIR filter with the given taps.
 func NewFIRFilter(taps []float64) *FIRFilter {
+	n := len(taps)
+	rev := make([]float64, n)
+	for i, t := range taps {
+		rev[n-1-i] = t
+	}
 	return &FIRFilter{
-		taps:   taps,
-		buffer: make([]float64, len(taps)),
+		origTaps: taps,
+		taps:     rev,
+		buffer:   make([]float64, 2*n),
+		n:        n,
 	}
 }
 
 // Filter processes a single sample and returns the filtered output.
 func (f *FIRFilter) Filter(x float64) float64 {
-	f.buffer[f.idx] = x
-	f.idx = (f.idx + 1) % len(f.taps)
+	f.buffer[f.pos] = x
+	f.buffer[f.pos+f.n] = x
+	f.pos++
+	if f.pos == f.n {
+		f.pos = 0
+	}
 
+	window := f.buffer[f.pos : f.pos+f.n]
 	var sum float64
 	for i, t := range f.taps {
-		j := (f.idx - 1 - i + len(f.taps)) % len(f.taps)
-		sum += t * f.buffer[j]
+		sum += t * window[i]
 	}
 	return sum
 }
@@ -41,35 +61,49 @@ func (f *FIRFilter) FilterSlice(in []float64) []float64 {
 	return out
 }
 
-// Taps returns the filter taps.
+// Taps returns the filter taps in their original (non-reversed) order.
 func (f *FIRFilter) Taps() []float64 {
-	return f.taps
+	return f.origTaps
 }
 
-// FIRComplexFilter is a complex-valued FIR filter.
+// FIRComplexFilter is a complex-valued FIR filter. See FIRFilter for the
+// mirrored-ring-buffer technique used to avoid per-tap modulo indexing.
 type FIRComplexFilter struct {
-	taps   []complex128
-	buffer []complex128
-	idx    int
+	origTaps []complex128
+	taps     []complex128
+	buffer   []complex128
+	n        int
+	pos      int
 }
 
 // NewFIRComplexFilter creates a new complex FIR filter with the given taps.
 func NewFIRComplexFilter(taps []complex128) *FIRComplexFilter {
+	n := len(taps)
+	rev := make([]complex128, n)
+	for i, t := range taps {
+		rev[n-1-i] = t
+	}
 	return &FIRComplexFilter{
-		taps:   taps,
-		buffer: make([]complex128, len(taps)),
+		origTaps: taps,
+		taps:     rev,
+		buffer:   make([]complex128, 2*n),
+		n:        n,
 	}
 }
 
 // Filter processes a single complex sample.
 func (f *FIRComplexFilter) Filter(x complex128) complex128 {
-	f.buffer[f.idx] = x
-	f.idx = (f.idx + 1) % len(f.taps)
+	f.buffer[f.pos] = x
+	f.buffer[f.pos+f.n] = x
+	f.pos++
+	if f.pos == f.n {
+		f.pos = 0
+	}
 
+	window := f.buffer[f.pos : f.pos+f.n]
 	var sum complex128
 	for i, t := range f.taps {
-		j := (f.idx - 1 - i + len(f.taps)) % len(f.taps)
-		sum += t * f.buffer[j]
+		sum += t * window[i]
 	}
 	return sum
 }
@@ -173,83 +207,4 @@ func DesignComplexBandpass(sampleRate, centerFreq, halfBandwidth float64, numTap
 	}
 
 	return taps
-}
-
-// IIRFilter is a simple first-order IIR filter used for de-emphasis and DC removal.
-type IIRFilter struct {
-	a    []float64 // feedforward coefficients
-	b    []float64 // feedback coefficients (b[0] is typically 1)
-	xBuf []float64
-	yBuf []float64
-	xIdx int
-	yIdx int
-}
-
-// NewIIRFilter creates a new IIR filter with the given coefficients.
-// a = feedforward, b = feedback (y[n] = sum(a*x[n-i]) - sum(b*y[n-j]) for j>0)
-func NewIIRFilter(a, b []float64) *IIRFilter {
-	return &IIRFilter{
-		a:    a,
-		b:    b,
-		xBuf: make([]float64, len(a)),
-		yBuf: make([]float64, len(b)),
-	}
-}
-
-// Filter processes a single sample.
-func (f *IIRFilter) Filter(x float64) float64 {
-	f.xBuf[f.xIdx] = x
-	f.xIdx = (f.xIdx + 1) % len(f.a)
-
-	y := 0.0
-	for i, a := range f.a {
-		j := (f.xIdx - 1 - i + len(f.a)) % len(f.a)
-		y += a * f.xBuf[j]
-	}
-	for j, b := range f.b {
-		if j == 0 {
-			continue
-		}
-		k := (f.yIdx - j + len(f.b)) % len(f.b)
-		y -= b * f.yBuf[k]
-	}
-
-	f.yBuf[f.yIdx] = y
-	f.yIdx = (f.yIdx + 1) % len(f.b)
-
-	return y
-}
-
-// FilterSlice processes a slice of samples.
-func (f *IIRFilter) FilterSlice(in []float64) []float64 {
-	out := make([]float64, len(in))
-	for i, x := range in {
-		out[i] = f.Filter(x)
-	}
-	return out
-}
-
-// DesignDeemphasis designs an FM de-emphasis IIR filter.
-// tau is the time constant in seconds (e.g., 75e-6 for US, 50e-6 for Europe).
-// sampleRate is in Hz.
-// Returns (feedforward, feedback) coefficients.
-func DesignDeemphasis(sampleRate, tau float64) ([]float64, []float64) {
-	// Single-pole low-pass IIR
-	// alpha = dt / (RC + dt) where dt = 1/sampleRate, RC = tau
-	dt := 1.0 / sampleRate
-	alpha := dt / (tau + dt)
-	// y[n] = alpha * x[n] + (1-alpha) * y[n-1]
-	a := []float64{alpha}
-	b := []float64{1.0, -(1 - alpha)}
-	return a, b
-}
-
-// DesignDCRemoval designs an IIR DC removal filter.
-// alpha controls the time constant (0.999 is typical).
-// Returns (feedforward, feedback) coefficients.
-func DesignDCRemoval(alpha float64) ([]float64, []float64) {
-	// y[n] = x[n] - x[n-1] + alpha * y[n-1]
-	a := []float64{1.0, -1.0}
-	b := []float64{1.0, -alpha}
-	return a, b
 }

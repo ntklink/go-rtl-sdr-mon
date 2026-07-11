@@ -26,12 +26,18 @@ const receivedLines = ref(0)
 const stats = ref<{ lines: number; sync: number; signalLevel: number }>({ lines: 0, sync: 0, signalLevel: 0 })
 let ws: WebSocket | null = null
 let statsTimer: ReturnType<typeof setInterval> | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+// Set by disconnectAPT() right before closing, so onclose can tell an
+// intentional stop (leaving NOAA mode, unmount) apart from an unexpected
+// drop that should trigger a reconnect.
+let intentionalClose = false
 let refCount = 0
 
 const api = useApi()
 
 function connectAPT() {
   if (ws) return
+  intentionalClose = false
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const wsURL = `${protocol}//${window.location.host}/api/ws/apt`
@@ -60,15 +66,23 @@ function connectAPT() {
 
   ws.onclose = () => {
     ws = null
+    if (!intentionalClose) {
+      reconnectTimer = setTimeout(() => connectAPT(), 2000)
+    }
   }
 
   ws.onerror = () => {
-    // Error handling - will reconnect if still needed
+    ws?.close()
   }
 }
 
 function disconnectAPT() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
   if (ws) {
+    intentionalClose = true
     ws.close()
     ws = null
   }

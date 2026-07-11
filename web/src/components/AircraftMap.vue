@@ -55,6 +55,17 @@ const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let tileLayer: L.TileLayer | null = null
 const markers: Map<string, L.Marker> = new Map()
+// Last-applied per-marker state, so updateMarkers can skip DOM work
+// (icon rebuild, popup content, position) for aircraft that haven't
+// actually changed since the last WebSocket message.
+interface MarkerState {
+  lat: number
+  lon: number
+  track: number
+  selected: boolean
+  popupHtml: string
+}
+const markerState: Map<string, MarkerState> = new Map()
 
 // Default: Pacific Ocean, world view (no receiver position yet)
 const DEFAULT_CENTER: L.LatLngExpression = [0, 160]
@@ -114,7 +125,7 @@ watch(rxPos, (pos) => {
   lastRxLat = pos.lat
   lastRxLon = pos.lon
   map.flyTo([pos.lat, pos.lon], 8, { duration: 1.0 })
-}, { deep: true })
+})
 
 function buildIconHtml(track: number, selected: boolean): string {
   const color = selected ? '#ff8800' : '#00ff88'
@@ -158,6 +169,7 @@ function updateMarkers() {
 
     // Create or update marker
     let marker = markers.get(ac.icao)
+    const prev = markerState.get(ac.icao)
     if (!marker) {
       const icon = L.divIcon({
         className: 'aircraft-marker',
@@ -173,16 +185,26 @@ function updateMarkers() {
       })
       markers.set(ac.icao, marker)
     } else {
-      marker.setLatLng(pos)
-      marker.setPopupContent(popupHtml)
-      // Rebuild icon HTML to reflect current selection state and rotation.
-      marker.setIcon(L.divIcon({
-        className: 'aircraft-marker',
-        html: buildIconHtml(rotDeg, selected),
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      }))
+      // Only touch the DOM for what actually changed — rebuilding the
+      // divIcon (a DOM element) on every WS tick for every aircraft is
+      // the expensive part, so it's gated on track/selection changing.
+      if (prev && (prev.lat !== ac.latitude || prev.lon !== ac.longitude)) {
+        marker.setLatLng(pos)
+      }
+      if (prev && prev.popupHtml !== popupHtml) {
+        marker.setPopupContent(popupHtml)
+      }
+      if (!prev || prev.track !== rotDeg || prev.selected !== selected) {
+        marker.setIcon(L.divIcon({
+          className: 'aircraft-marker',
+          html: buildIconHtml(rotDeg, selected),
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        }))
+      }
     }
+
+    markerState.set(ac.icao, { lat: ac.latitude, lon: ac.longitude, track: rotDeg, selected, popupHtml })
   }
 
   // Remove markers for aircraft no longer tracked
@@ -190,6 +212,7 @@ function updateMarkers() {
     if (!seen.has(icao)) {
       map!.removeLayer(marker)
       markers.delete(icao)
+      markerState.delete(icao)
     }
   }
 }
@@ -219,6 +242,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   markers.clear()
+  markerState.clear()
   map?.remove()
   map = null
 })

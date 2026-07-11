@@ -84,6 +84,11 @@ func OpenRTLSDR(index int, sampleRate, centerFreq uint32) (*RTLSDRSource, error)
 
 // Info returns device information.
 func (s *RTLSDRSource) Info() (DeviceInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dev == nil {
+		return DeviceInfo{}, fmt.Errorf("device closed")
+	}
 	usb, err := s.dev.GetUSBStrings()
 	if err != nil {
 		usb = rtlsdr.USBStrings{}
@@ -177,6 +182,8 @@ func (s *RTLSDRSource) Stop() {
 // Close closes the device.
 func (s *RTLSDRSource) Close() {
 	s.Stop()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.dev != nil {
 		_ = s.dev.Close()
 		s.dev = nil
@@ -188,11 +195,19 @@ func (s *RTLSDRSource) SetCenterFreq(freq uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.centerFreq = freq
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	return s.dev.SetCenterFreq(freq)
 }
 
 // GetCenterFreq returns the current center frequency in Hz.
 func (s *RTLSDRSource) GetCenterFreq() uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dev == nil {
+		return s.centerFreq
+	}
 	return s.dev.GetCenterFreq()
 }
 
@@ -201,6 +216,9 @@ func (s *RTLSDRSource) SetFreqCorrection(ppm int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.freqCorrection = ppm
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	return s.dev.SetFreqCorrection(ppm)
 }
 
@@ -209,11 +227,19 @@ func (s *RTLSDRSource) SetSampleRate(rate uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sampleRate = rate
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	return s.dev.SetSampleRate(rate)
 }
 
 // GetSampleRate returns the current sample rate in Hz.
 func (s *RTLSDRSource) GetSampleRate() uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dev == nil {
+		return s.sampleRate
+	}
 	return s.dev.GetSampleRate()
 }
 
@@ -222,6 +248,9 @@ func (s *RTLSDRSource) SetAutoGain(auto bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.autoGain.Store(auto)
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	mode := !auto // false=auto gain, true=manual gain
 	if err := s.dev.SetTunerGainMode(mode); err != nil {
 		return err
@@ -243,11 +272,19 @@ func (s *RTLSDRSource) SetGain(gain int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gain = gain
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	return s.dev.SetTunerGain(gain)
 }
 
 // GetGain returns the current gain in tenths of dB.
 func (s *RTLSDRSource) GetGain() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dev == nil {
+		return s.gain
+	}
 	return s.dev.GetTunerGain()
 }
 
@@ -261,11 +298,19 @@ func (s *RTLSDRSource) SetBandwidth(bw uint32) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bandwidth = bw
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	return s.dev.SetTunerBandwidth(bw)
 }
 
 // SetBiasTee enables or disables the bias-T.
 func (s *RTLSDRSource) SetBiasTee(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dev == nil {
+		return fmt.Errorf("device closed")
+	}
 	return s.dev.SetBiasTee(on)
 }
 

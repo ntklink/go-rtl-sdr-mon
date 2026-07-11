@@ -2,7 +2,14 @@ package sdr
 
 import (
 	"math"
+	"math/cmplx"
 )
+
+// nco renormalization interval: how many samples the incrementally-rotated
+// phasor advances before its magnitude is corrected back to 1. Left
+// uncorrected, repeated complex multiplication drifts the magnitude away
+// from unity through floating-point rounding.
+const ncoRenormInterval = 4096
 
 // DDC is a Digital Down Converter that shifts a desired frequency to baseband
 // and decimates the signal to a lower sample rate.
@@ -11,9 +18,15 @@ type DDC struct {
 	quadRate   float64 // output rate
 	decim      int
 
-	// NCO (numerically controlled oscillator)
-	phase     float64
-	phaseStep float64
+	// NCO (numerically controlled oscillator), represented as a unit
+	// phasor that's incrementally rotated by multiplying with a fixed
+	// per-sample step, rather than recomputing cos/sin(phase) from
+	// scratch every sample. Valid because the mix frequency is constant
+	// between SetCenterFreq calls (unlike a PLL, whose step varies every
+	// sample with the error feedback and can't be precomputed this way).
+	osc         complex128
+	oscStep     complex128
+	sinceRenorm int
 
 	// Lowpass filter for decimation
 	lpFilter *FIRComplexFilter
@@ -55,6 +68,7 @@ func NewDDC(sampleRate, centerFreq, targetQuadRate float64) *DDC {
 		sampleRate: sampleRate,
 		quadRate:   quadRate,
 		decim:      decim,
+		osc:        1, // unit phasor (phase 0)
 		lpFilter:   NewFIRComplexFilter(ctaps),
 	}
 
@@ -64,7 +78,8 @@ func NewDDC(sampleRate, centerFreq, targetQuadRate float64) *DDC {
 
 // setCenterFreq sets the frequency to shift to baseband.
 func (d *DDC) setCenterFreq(freq float64) {
-	d.phaseStep = -2 * math.Pi * freq / d.sampleRate
+	phaseStep := -2 * math.Pi * freq / d.sampleRate
+	d.oscStep = complex(math.Cos(phaseStep), math.Sin(phaseStep))
 }
 
 // SetCenterFreq updates the center frequency (thread-safe via caller lock).
@@ -87,14 +102,14 @@ func (d *DDC) Process(in []complex128) []complex128 {
 	out := make([]complex128, 0, len(in)/d.decim+1)
 
 	for _, s := range in {
-		// Mix with NCO
-		osc := complex(math.Cos(d.phase), math.Sin(d.phase))
-		mixed := s * osc
-		d.phase += d.phaseStep
-		if d.phase > 2*math.Pi {
-			d.phase -= 2 * math.Pi
-		} else if d.phase < 0 {
-			d.phase += 2 * math.Pi
+		// Mix with NCO: rotate the unit phasor by the fixed per-sample
+		// step instead of recomputing cos/sin(phase) from scratch.
+		mixed := s * d.osc
+		d.osc *= d.oscStep
+		d.sinceRenorm++
+		if d.sinceRenorm >= ncoRenormInterval {
+			d.sinceRenorm = 0
+			d.osc /= complex(cmplx.Abs(d.osc), 0)
 		}
 
 		// Filter

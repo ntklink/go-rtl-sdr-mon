@@ -58,17 +58,27 @@ func fixSingleBitError(msg []byte) ([]byte, bool) {
 		return msg, false
 	}
 
+	// Work on a single scratch copy, flipping/un-flipping each candidate
+	// bit in place, instead of allocating a fresh 14-byte slice per one of
+	// up to 112 attempts (this runs on every CRC failure, which noise
+	// makes common). msg[:11] is the CRC input for every attempt except
+	// when byteIdx is in the parity bytes (11-13); computeCRC only reads
+	// [:11], so parity-bit flips don't change that computation, but we
+	// still need the parity bytes correct in the returned message.
+	fixed := make([]byte, len(msg))
+	copy(fixed, msg)
+
 	// Try flipping each bit (all 112 bits = 14 bytes, including parity) and
 	// check CRC. A single-bit error in the parity leaves the payload intact,
 	// so those messages must be correctable too.
 	for byteIdx := range 14 {
 		for bitIdx := range 8 {
-			fixed := make([]byte, len(msg))
-			copy(fixed, msg)
-			fixed[byteIdx] ^= 1 << (7 - bitIdx)
+			bit := byte(1 << (7 - bitIdx))
+			fixed[byteIdx] ^= bit
 			if checkCRC(fixed) {
 				return fixed, true
 			}
+			fixed[byteIdx] ^= bit // undo before trying the next bit
 		}
 	}
 	return msg, false

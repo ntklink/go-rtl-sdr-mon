@@ -17,7 +17,9 @@ type FMDemod struct {
 	hasDeemph   bool
 }
 
-// iirFilter is a simple first-order IIR filter (local copy to avoid import cycle).
+// iirFilter is a simple IIR filter used for de-emphasis and DC removal
+// across this package (fm.go, wfm.go, am.go, amsync.go). It can't live in
+// the sdr package instead, since sdr already imports demod.
 type iirFilter struct {
 	a    []float64
 	b    []float64

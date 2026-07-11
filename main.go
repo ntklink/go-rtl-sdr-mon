@@ -105,11 +105,11 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 
-	// CORS for development
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodOptions},
-	}))
+	// No CORS middleware: the frontend always talks to this server same-origin
+	// (embedded build, or Vite's dev proxy), and the control API has no auth,
+	// so allowing cross-origin requests would let any page on the LAN drive
+	// the SDR. Cap request bodies to guard against oversized JSON payloads.
+	e.Use(middleware.BodyLimit("64K"))
 
 	// Register API routes
 	server := NewServer(dm, receiver)
@@ -134,6 +134,10 @@ func main() {
 		receiver.Stop()
 		source.Stop()
 		_ = e.Close()
+		// os.Exit below skips deferred calls, so close the USB device
+		// explicitly here — otherwise the RTL-SDR handle stays claimed
+		// and a subsequent start can fail until replugged.
+		dm.CloseAll()
 		os.Exit(0)
 	}()
 

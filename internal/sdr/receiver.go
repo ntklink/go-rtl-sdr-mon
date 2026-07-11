@@ -719,7 +719,8 @@ const ADSBSampleRate = 2000000
 
 // setDemodulator creates the appropriate demodulator for the given type
 // and auto-adjusts the filter bandwidth to the NORMAL preset for that mode
-// (matching gqrx behavior exactly).
+// (matching gqrx behavior exactly). It also switches the sample rate when
+// entering/leaving ADS-B mode (which requires 2 MHz).
 func (r *Receiver) setDemodulator(dt DemodType) {
 	// If switching from ADS-B to another mode, restore the previous sample rate
 	if r.demodType == DemodADSB && dt != DemodADSB && r.prevSampleRate != 0 {
@@ -733,56 +734,7 @@ func (r *Receiver) setDemodulator(dt DemodType) {
 		_ = r.reconfigureSampleRate(ADSBSampleRate)
 	}
 
-	r.demodType = dt
-	quadRate := r.ddc.QuadRate()
-
-	// Determine if this is a CW mode — CW offset only applies to CW modes.
-	isCW := dt == DemodCWL || dt == DemodCWU
-
-	switch dt {
-	case DemodNFM:
-		r.demod = demod.NewFMDemod(quadRate, 5000, 75e-6)
-	case DemodWFM:
-		r.demod = demod.NewWFMDemod(quadRate, 75000, false, false)
-	case DemodWFMStereo:
-		r.demod = demod.NewWFMDemod(quadRate, 75000, true, false)
-	case DemodWFMOirt:
-		r.demod = demod.NewWFMDemod(quadRate, 75000, true, true)
-	case DemodAM:
-		r.demod = demod.NewAMDemod(quadRate, true)
-	case DemodAMSync:
-		r.demod = demod.NewAMSyncDemod(quadRate, true, 0.001)
-	case DemodLSB, DemodUSB, DemodCWL, DemodCWU:
-		// SSB/CW demodulation: take the real part. Sideband selection
-		// is done by the bandpass filter (asymmetric for LSB/USB).
-		r.demod = demod.NewSSBDemod(quadRate)
-	case DemodRaw:
-		// Raw I/Q: pass through without demodulation
-		r.demod = demod.NewSSBDemod(quadRate) // real part = I channel
-	case DemodADSB:
-		// ADS-B: no audio demodulator, raw samples go to ADS-B decoder
-		r.demod = nil
-	case DemodNOAA:
-		// NOAA APT: FM demod with 17 kHz deviation, no de-emphasis
-		r.demod = demod.NewFMDemod(quadRate, 17000, 0)
-	case DemodOff:
-		r.demod = nil
-	}
-
-	// Update DDC center frequency: CW offset only applies to CW modes.
-	if isCW {
-		r.ddc.SetCenterFreq(r.filterOffset - r.cwOffset)
-	} else {
-		r.ddc.SetCenterFreq(r.filterOffset)
-	}
-
-	// Apply NORMAL filter preset for this mode (gqrx default behavior)
-	if dt != DemodOff {
-		preset := filterPresetTable[dt]
-		r.filterLow = preset[FilterPresetNormal][0]
-		r.filterHigh = preset[FilterPresetNormal][1]
-		r.updateFilter()
-	}
+	r.setDemodulatorNoRateChange(dt)
 }
 
 // sendStatus sends a status update to all subscribers.

@@ -130,6 +130,7 @@ function onMouseUp() {
 onUnmounted(() => {
   window.removeEventListener('mousemove', onMouseMove)
   window.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('resize', updateCanvasSize)
 })
 
 const freqTicks = computed(() => {

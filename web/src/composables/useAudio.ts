@@ -26,6 +26,7 @@ export function useAudio() {
   }
 
   function connect() {
+    if (ws) return // already connected/connecting; avoid a duplicate stream
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     ws = new WebSocket(`${proto}//${location.host}/api/ws/audio`)
     ws.binaryType = 'arraybuffer'
@@ -90,6 +91,7 @@ export function useAudio() {
 
     ws.onclose = () => {
       isPlaying.value = false
+      ws = null // allow connect()'s reentry guard to pass on reconnect
       reconnectTimer = window.setTimeout(() => connect(), 2000)
     }
     ws.onerror = () => {

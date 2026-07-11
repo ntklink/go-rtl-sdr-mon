@@ -509,10 +509,21 @@ type fftSizeRequest struct {
 	Size int `json:"size"`
 }
 
+// fftSizeMin/Max bound the FFT size accepted from clients. The UI only ever
+// offers 1024-16384; the range is kept wide enough for that plus headroom
+// while still rejecting sizes large enough to exhaust memory on a Pi.
+const (
+	fftSizeMin = 256
+	fftSizeMax = 32768
+)
+
 func (s *Server) handleSetFFTSize(c echo.Context) error {
 	var req fftSizeRequest
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	if req.Size < fftSizeMin || req.Size > fftSizeMax {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "size out of range"})
 	}
 	s.receiver.SetFFTSize(req.Size)
 	return c.JSON(http.StatusOK, req)
@@ -635,6 +646,51 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// WebSocket keepalive tuning. Every handler installs a read deadline that
+// only a client Pong (sent automatically in response to our Ping) or an
+// actual client message extends; a connection that goes dark without a
+// clean close (Wi-Fi drop, phone sleep) is therefore reaped after
+// wsPongWait instead of leaking a subscriber forever.
+const (
+	wsWriteWait  = 10 * time.Second
+	wsPongWait   = 60 * time.Second
+	wsPingPeriod = 25 * time.Second // must be < wsPongWait
+)
+
+// startWSReadPump installs a read deadline + pong handler and starts a
+// goroutine that drains incoming frames (processing pongs/close control
+// frames along the way). On any read error — including a deadline timeout —
+// it closes ws, which unblocks a writer that may be parked in the caller's
+// main select loop. Callers keep their own `defer ws.Close()`; the extra
+// call from here is harmless.
+func startWSReadPump(ws *websocket.Conn) {
+	_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
+	ws.SetPongHandler(func(string) error {
+		return ws.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+	go func() {
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				_ = ws.Close()
+				return
+			}
+		}
+	}()
+}
+
+// wsWriteMessage writes with a write deadline so a stalled client can't
+// block the sending goroutine indefinitely.
+func wsWriteMessage(ws *websocket.Conn, messageType int, data []byte) error {
+	_ = ws.SetWriteDeadline(time.Now().Add(wsWriteWait))
+	return ws.WriteMessage(messageType, data)
+}
+
+// wsWriteJSON is the JSON counterpart of wsWriteMessage.
+func wsWriteJSON(ws *websocket.Conn, v any) error {
+	_ = ws.SetWriteDeadline(time.Now().Add(wsWriteWait))
+	return ws.WriteJSON(v)
+}
+
 // handleWSFFT streams FFT spectrum data over WebSocket.
 // The ?bins= query parameter controls how many bins are sent (decimated by averaging).
 // Default is 1024 bins to reduce bandwidth.
@@ -644,6 +700,7 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 		return err
 	}
 	defer func() { _ = ws.Close() }()
+	startWSReadPump(ws)
 
 	fftCh := s.receiver.SubscribeFFT()
 	defer s.receiver.UnsubscribeFFT(fftCh)
@@ -661,12 +718,12 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 	header := make([]byte, 8)
 	binary.LittleEndian.PutUint32(header[0:4], uint32(size))
 	binary.LittleEndian.PutUint32(header[4:8], uint32(bins))
-	if err := ws.WriteMessage(websocket.BinaryMessage, header); err != nil {
+	if err := wsWriteMessage(ws, websocket.BinaryMessage, header); err != nil {
 		return nil
 	}
 
 	// Keepalive ping (reusable ticker avoids accumulating timers per iteration)
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(wsPingPeriod)
 	defer ticker.Stop()
 
 	for {
@@ -681,12 +738,12 @@ func (s *Server) handleWSFFT(c echo.Context) error {
 			for i, v := range out {
 				binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))
 			}
-			if err := ws.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+			if err := wsWriteMessage(ws, websocket.BinaryMessage, buf); err != nil {
 				return nil
 			}
 		case <-ticker.C:
 			// Keepalive
-			if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := wsWriteMessage(ws, websocket.PingMessage, nil); err != nil {
 				return nil
 			}
 		}
@@ -754,78 +811,78 @@ func (s *Server) handleWSAudio(c echo.Context) error {
 		return err
 	}
 	defer func() { _ = ws.Close() }()
+	startWSReadPump(ws)
 
 	audioCh := s.receiver.SubscribeAudio()
 	defer s.receiver.UnsubscribeAudio(audioCh)
 	var writeMu sync.Mutex
-	done := make(chan struct{})
-	defer close(done)
 
-	// Reader for close detection
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-			if _, _, err := ws.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}()
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
 
 	for {
-		audio, ok := <-audioCh
-		if !ok {
-			return nil
-		}
-
-		// Format: [1 byte: channels] [4 bytes: sample count] [samples...]
-		// Each sample is int16 (2 bytes)
-		// Mono: left only, Stereo: interleaved L,R,L,R...
-		channels := 1
-		if audio.Right != nil {
-			channels = 2
-		}
-
-		// The L/R resamplers are independent and may produce blocks that differ
-		// in length by a sample; use the shorter length to avoid out-of-range.
-		numSamples := len(audio.Left)
-		if channels == 2 && len(audio.Right) < numSamples {
-			numSamples = len(audio.Right)
-		}
-
-		bufLen := 1 + 4 + numSamples*channels*2
-		buf := make([]byte, bufLen)
-		buf[0] = byte(channels)
-		binary.LittleEndian.PutUint32(buf[1:5], uint32(numSamples))
-
-		offset := 5
-		if channels == 1 {
-			for i := 0; i < numSamples; i++ {
-				iv := floatToInt16(audio.Left[i])
-				binary.LittleEndian.PutUint16(buf[offset:], uint16(iv))
-				offset += 2
+		select {
+		case <-ticker.C:
+			writeMu.Lock()
+			err := wsWriteMessage(ws, websocket.PingMessage, nil)
+			writeMu.Unlock()
+			if err != nil {
+				return nil
 			}
-		} else {
-			for i := 0; i < numSamples; i++ {
-				lv := floatToInt16(audio.Left[i])
-				rv := floatToInt16(audio.Right[i])
-				binary.LittleEndian.PutUint16(buf[offset:], uint16(lv))
-				offset += 2
-				binary.LittleEndian.PutUint16(buf[offset:], uint16(rv))
-				offset += 2
+			continue
+		case audio, ok := <-audioCh:
+			if !ok {
+				return nil
 			}
-		}
-
-		writeMu.Lock()
-		err := ws.WriteMessage(websocket.BinaryMessage, buf)
-		writeMu.Unlock()
-		if err != nil {
-			return nil
+			if err := writeAudioFrame(ws, &writeMu, audio); err != nil {
+				return nil
+			}
 		}
 	}
+}
+
+// writeAudioFrame encodes and writes one audio block.
+// Format: [1 byte: channels] [4 bytes: sample count] [samples...]
+// Each sample is int16 (2 bytes). Mono: left only, Stereo: interleaved L,R,L,R...
+func writeAudioFrame(ws *websocket.Conn, writeMu *sync.Mutex, audio sdr.AudioBlock) error {
+	channels := 1
+	if audio.Right != nil {
+		channels = 2
+	}
+
+	// The L/R resamplers are independent and may produce blocks that differ
+	// in length by a sample; use the shorter length to avoid out-of-range.
+	numSamples := len(audio.Left)
+	if channels == 2 && len(audio.Right) < numSamples {
+		numSamples = len(audio.Right)
+	}
+
+	bufLen := 1 + 4 + numSamples*channels*2
+	buf := make([]byte, bufLen)
+	buf[0] = byte(channels)
+	binary.LittleEndian.PutUint32(buf[1:5], uint32(numSamples))
+
+	offset := 5
+	if channels == 1 {
+		for i := 0; i < numSamples; i++ {
+			iv := floatToInt16(audio.Left[i])
+			binary.LittleEndian.PutUint16(buf[offset:], uint16(iv))
+			offset += 2
+		}
+	} else {
+		for i := 0; i < numSamples; i++ {
+			lv := floatToInt16(audio.Left[i])
+			rv := floatToInt16(audio.Right[i])
+			binary.LittleEndian.PutUint16(buf[offset:], uint16(lv))
+			offset += 2
+			binary.LittleEndian.PutUint16(buf[offset:], uint16(rv))
+			offset += 2
+		}
+	}
+
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return wsWriteMessage(ws, websocket.BinaryMessage, buf)
 }
 
 // handleWSStatus streams status updates over WebSocket.
@@ -835,13 +892,16 @@ func (s *Server) handleWSStatus(c echo.Context) error {
 		return err
 	}
 	defer func() { _ = ws.Close() }()
+	startWSReadPump(ws)
 
 	statusCh := s.receiver.SubscribeStatus()
 	defer s.receiver.UnsubscribeStatus(statusCh)
 
 	// Send periodic full status for responsive UI and keepalive
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
+	statusTicker := time.NewTicker(500 * time.Millisecond)
+	defer statusTicker.Stop()
+	pingTicker := time.NewTicker(wsPingPeriod)
+	defer pingTicker.Stop()
 
 	for {
 		select {
@@ -849,12 +909,16 @@ func (s *Server) handleWSStatus(c echo.Context) error {
 			if !ok {
 				return nil
 			}
-			if err := ws.WriteJSON(status); err != nil {
+			if err := wsWriteJSON(ws, status); err != nil {
 				return nil
 			}
-		case <-ticker.C:
+		case <-statusTicker.C:
 			status := s.receiver.GetStatus()
-			if err := ws.WriteJSON(status); err != nil {
+			if err := wsWriteJSON(ws, status); err != nil {
+				return nil
+			}
+		case <-pingTicker.C:
+			if err := wsWriteMessage(ws, websocket.PingMessage, nil); err != nil {
 				return nil
 			}
 		}
@@ -868,32 +932,33 @@ func (s *Server) handleWSAircraft(c echo.Context) error {
 		return err
 	}
 	defer func() { _ = ws.Close() }()
+	startWSReadPump(ws)
 
 	aircraftCh := s.receiver.SubscribeAircraft()
 	defer s.receiver.UnsubscribeAircraft(aircraftCh)
 
-	// Reader for close detection
-	go func() {
-		for {
-			if _, _, err := ws.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}()
-
 	// Send initial snapshot
 	aircraft := s.receiver.GetAircraft()
-	if err := ws.WriteJSON(aircraft); err != nil {
+	if err := wsWriteJSON(ws, aircraft); err != nil {
 		return nil
 	}
 
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
+
 	for {
-		aircraft, ok := <-aircraftCh
-		if !ok {
-			return nil
-		}
-		if err := ws.WriteJSON(aircraft); err != nil {
-			return nil
+		select {
+		case aircraft, ok := <-aircraftCh:
+			if !ok {
+				return nil
+			}
+			if err := wsWriteJSON(ws, aircraft); err != nil {
+				return nil
+			}
+		case <-ticker.C:
+			if err := wsWriteMessage(ws, websocket.PingMessage, nil); err != nil {
+				return nil
+			}
 		}
 	}
 }
@@ -972,37 +1037,31 @@ func (s *Server) handleWSAPT(c echo.Context) error {
 		return err
 	}
 	defer func() { _ = ws.Close() }()
+	startWSReadPump(ws)
 
 	aptCh := s.receiver.SubscribeAPT()
 	defer s.receiver.UnsubscribeAPT(aptCh)
 
-	// Reader for close detection
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-			if _, _, err := ws.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}()
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
 
 	for {
-		line, ok := <-aptCh
-		if !ok {
-			return nil
-		}
-		// 4 bytes line number + 2080 bytes pixel data
-		buf := make([]byte, 4+len(line.Pixels))
-		binary.LittleEndian.PutUint32(buf[0:4], uint32(line.LineNum))
-		copy(buf[4:], line.Pixels)
-		if err := ws.WriteMessage(websocket.BinaryMessage, buf); err != nil {
-			return nil
+		select {
+		case line, ok := <-aptCh:
+			if !ok {
+				return nil
+			}
+			// 4 bytes line number + 2080 bytes pixel data
+			buf := make([]byte, 4+len(line.Pixels))
+			binary.LittleEndian.PutUint32(buf[0:4], uint32(line.LineNum))
+			copy(buf[4:], line.Pixels)
+			if err := wsWriteMessage(ws, websocket.BinaryMessage, buf); err != nil {
+				return nil
+			}
+		case <-ticker.C:
+			if err := wsWriteMessage(ws, websocket.PingMessage, nil); err != nil {
+				return nil
+			}
 		}
 	}
 }
