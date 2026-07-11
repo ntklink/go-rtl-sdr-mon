@@ -123,14 +123,25 @@ func main() {
 	}))
 
 	// Handle signals for clean shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Run shutdown in a goroutine so the main goroutine can force-exit
+	// if graceful shutdown hangs (e.g. RTL-SDR USB read stuck).
 	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		log.Printf("Shutting down...")
+		log.Printf("Shutting down (press Ctrl+C again to force exit)...")
 		receiver.Stop()
 		source.Stop()
 		_ = e.Close()
+		os.Exit(0)
+	}()
+
+	// Second signal: force immediate exit (handles stuck USB cleanup)
+	go func() {
+		<-sigCh
+		log.Printf("Force exit")
+		os.Exit(1)
 	}()
 
 	// Start HTTP/HTTPS server
@@ -142,12 +153,16 @@ func main() {
 		}
 		log.Printf("Web server starting on https://0.0.0.0%s", addr)
 		if err := e.StartTLS(addr, certFile, keyFile); err != nil {
-			log.Fatalf("Server error: %v", err)
+			if err != http.ErrServerClosed {
+				log.Fatalf("Server error: %v", err)
+			}
 		}
 	} else {
 		log.Printf("Web server starting on http://0.0.0.0%s", addr)
 		if err := e.Start(addr); err != nil {
-			log.Fatalf("Server error: %v", err)
+			if err != http.ErrServerClosed {
+				log.Fatalf("Server error: %v", err)
+			}
 		}
 	}
 }
