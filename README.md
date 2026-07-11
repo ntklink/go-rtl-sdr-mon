@@ -1,6 +1,6 @@
 # Go RTL-SDR Monitor
 
-A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment. Supports broadcast FM/AM/SSB/CW, ADS-B aircraft tracking, and NOAA weather satellite APT imagery decoding.
+A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment. Supports broadcast FM/AM/SSB/CW, ADS-B aircraft tracking. Tested with the RTL-SDR Blog V4 & V3 dongles (RTL2832U + R828D, TCXO, bias-tee, HF).
 
 ![Overview](docs/image-overview.jpg)
 
@@ -8,7 +8,7 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 
 ## Features
 
-- **RTL-SDR Support** — Built on [go-rtl-sdr](https://github.com/ntklink/go-rtl-sdr) CGO bindings; multi-device support via a pluggable `SDRDevice` interface
+- **RTL-SDR Support** — Built on [go-rtl-sdr](https://github.com/ntklink/go-rtl-sdr) CGO bindings; multi-device support via a pluggable `SDRDevice` interface. Tested with the [RTL-SDR Blog V4](https://www.rtl-sdr.com/buy-rtl-sdr-dvb-t-dongles/) dongle (RTL2832U + R828D tuner, TCXO, bias-tee, HF direct-sampling)
 - **Web UI** — Vue 3 + [Reka UI](https://github.com/unovue/reka-ui), embedded into the Go binary via `//go:embed`
 - **Real-time Spectrum & Waterfall** — Canvas-rendered, streamed over WebSocket with configurable FFT size, rate, averaging, and max-hold
 - **Browser Audio Playback** — Demodulated PCM audio streamed over WebSocket, played with the Web Audio API
