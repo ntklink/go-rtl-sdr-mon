@@ -1,5 +1,6 @@
 <template>
   <div class="frequency-control">
+    <span class="freq-label">{{ t('freq.label') }}</span>
     <div class="freq-display" @wheel.prevent="onWheel" :title="t('freq.scrollHint')">
       <input v-if="editing" ref="editInput" v-model="inputFreq" type="text" class="freq-edit-input"
         @keyup.enter="applyFreq" @keyup.esc="cancelEdit" @blur="applyFreq" @wheel.stop.prevent />
@@ -114,7 +115,13 @@ function onWheel(e: WheelEvent) {
   gap: 12px;
   padding: 8px 16px;
   background: #111;
-  margin-left: auto;
+}
+
+.freq-label {
+  font-size: 10px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .freq-display {
