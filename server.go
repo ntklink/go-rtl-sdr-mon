@@ -21,8 +21,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/ntklink/go-rtl-sdr-mon/internal/lrpt"
-	"github.com/ntklink/go-rtl-sdr-mon/internal/sdr"
+	"github.com/ntklink/GoEther-SDR/internal/lrpt"
+	"github.com/ntklink/GoEther-SDR/internal/sdr"
 )
 
 // --- Utility functions (migrated from console.go) ---
@@ -86,8 +86,8 @@ func EnsureTLSCert() (certFile, keyFile string, err error) {
 	template := x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:   "go-rtl-sdr-mon",
-			Organization: []string{"go-rtl-sdr-mon"},
+			CommonName:   "goether-sdr",
+			Organization: []string{"goether-sdr"},
 		},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(10, 0, 0),

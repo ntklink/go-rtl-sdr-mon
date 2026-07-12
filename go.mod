@@ -1,4 +1,4 @@
-module github.com/ntklink/go-rtl-sdr-mon
+module github.com/ntklink/GoEther-SDR
 
 go 1.26.4
 

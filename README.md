@@ -1,4 +1,4 @@
-# Go RTL-SDR Monitor
+# GoEther-SDR
 
 A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment. Supports broadcast FM/AM/SSB/CW, ADS-B aircraft tracking, and Meteor-M LRPT weather satellite imagery. Tested with the RTL-SDR Blog V4 & V3 dongles (RTL2832U + R828D, TCXO, bias-tee, HF).
 
@@ -32,27 +32,27 @@ RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canv
 
 ### DSP Signal Chain
 
-| Stage              | File                        | Description                                                                  |
-| ------------------ | --------------------------- | ---------------------------------------------------------------------------- |
-| Source             | `internal/sdr/source.go`    | RTL-SDR async read, 8-bit IQ → complex128                                    |
-| Device Abstraction | `internal/sdr/device.go`    | `SDRDevice` interface, `DeviceManager` for enumeration & hot-swap            |
-| FFT                | `internal/sdr/fft.go`       | Custom radix-2 Cooley-Tukey FFT, Hann window, max-hold with decay            |
-| DDC                | `internal/sdr/ddc.go`       | Digital down-converter (NCO + FIR low-pass + decimation)                     |
-| Filter             | `internal/sdr/filter.go`    | Windowed-sinc FIR design (low-pass / band-pass / complex band-pass)          |
-| Demodulator        | `internal/demod/`           | FM, WFM (mono/stereo/OIRT), AM, AM-Sync (PLL), SSB                           |
-| AGC                | `internal/sdr/agc.go`       | AGC with hang, gqrx-matched presets                                          |
-| Resampler          | `internal/sdr/resampler.go` | Anti-aliased FIR + linear interpolation to 48 kHz                            |
-| Receiver           | `internal/sdr/receiver.go`  | Top-level orchestration, per-client pub/sub for FFT & audio, source hot-swap |
-| ADS-B Decoder      | `internal/adsb/decoder.go`  | IQ → preamble detection → Manchester decoding → CRC verification             |
-| ADS-B Messages     | `internal/adsb/message.go`  | Callsign, altitude, airborne position, velocity extraction                   |
-| ADS-B CPR          | `internal/adsb/cpr.go`      | Compact Position Reporting (global + relative) decoding                      |
-| ADS-B CRC          | `internal/adsb/crc.go`      | Mode S 24-bit CRC with single-bit error correction                           |
-| ADS-B Tracker      | `internal/adsb/tracker.go`  | Multi-aircraft tracking, ICAO-based state merging, CPR caching               |
-| LRPT Demodulator   | `internal/lrpt/demod.go`    | QPSK 72k: AGC, Costas loop, RRC matched filter, Gardner timing, FFT carrier acquisition |
+| Stage              | File                                 | Description                                                                               |
+| ------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Source             | `internal/sdr/source.go`             | RTL-SDR async read, 8-bit IQ → complex128                                                 |
+| Device Abstraction | `internal/sdr/device.go`             | `SDRDevice` interface, `DeviceManager` for enumeration & hot-swap                         |
+| FFT                | `internal/sdr/fft.go`                | Custom radix-2 Cooley-Tukey FFT, Hann window, max-hold with decay                         |
+| DDC                | `internal/sdr/ddc.go`                | Digital down-converter (NCO + FIR low-pass + decimation)                                  |
+| Filter             | `internal/sdr/filter.go`             | Windowed-sinc FIR design (low-pass / band-pass / complex band-pass)                       |
+| Demodulator        | `internal/demod/`                    | FM, WFM (mono/stereo/OIRT), AM, AM-Sync (PLL), SSB                                        |
+| AGC                | `internal/sdr/agc.go`                | AGC with hang, gqrx-matched presets                                                       |
+| Resampler          | `internal/sdr/resampler.go`          | Anti-aliased FIR + linear interpolation to 48 kHz                                         |
+| Receiver           | `internal/sdr/receiver.go`           | Top-level orchestration, per-client pub/sub for FFT & audio, source hot-swap              |
+| ADS-B Decoder      | `internal/adsb/decoder.go`           | IQ → preamble detection → Manchester decoding → CRC verification                          |
+| ADS-B Messages     | `internal/adsb/message.go`           | Callsign, altitude, airborne position, velocity extraction                                |
+| ADS-B CPR          | `internal/adsb/cpr.go`               | Compact Position Reporting (global + relative) decoding                                   |
+| ADS-B CRC          | `internal/adsb/crc.go`               | Mode S 24-bit CRC with single-bit error correction                                        |
+| ADS-B Tracker      | `internal/adsb/tracker.go`           | Multi-aircraft tracking, ICAO-based state merging, CPR caching                            |
+| LRPT Demodulator   | `internal/lrpt/demod.go`             | QPSK 72k: AGC, Costas loop, RRC matched filter, Gardner timing, FFT carrier acquisition   |
 | LRPT FEC           | `internal/lrpt/viterbi.go` / `rs.go` | Soft-decision Viterbi (K=7, r=1/2, CCSDS 0171/0133); Reed-Solomon (255,223) ×4 interleave |
-| LRPT Deframer      | `internal/lrpt/deframer.go` | ASM correlation with 8-fold QPSK ambiguity resolution, PN derandomization    |
-| LRPT Packets       | `internal/lrpt/packet.go`   | VCDU → CCSDS space packet reassembly, MSU-MR segment extraction              |
-| LRPT JPEG          | `internal/lrpt/jpeg.go`     | MSU-MR JPEG: Annex K Huffman tables, quality-scaled dequantization, IDCT     |
+| LRPT Deframer      | `internal/lrpt/deframer.go`          | ASM correlation with 8-fold QPSK ambiguity resolution, PN derandomization                 |
+| LRPT Packets       | `internal/lrpt/packet.go`            | VCDU → CCSDS space packet reassembly, MSU-MR segment extraction                           |
+| LRPT JPEG          | `internal/lrpt/jpeg.go`              | MSU-MR JPEG: Annex K Huffman tables, quality-scaled dequantization, IDCT                  |
 
 ## Build
 
@@ -79,7 +79,7 @@ make clean    # Clean build artifacts
 
 ```bash
 cd web && npm install && npm run build    # Frontend → web/dist/
-go build -trimpath -ldflags="-s -w" -o bin/go-rtl-sdr-mon .
+go build -trimpath -ldflags="-s -w" -o bin/goether-sdr .
 ```
 
 **Prerequisites:**
@@ -96,9 +96,9 @@ docker buildx inspect --bootstrap
 **Build commands:**
 
 ```bash
-make build-amd64    # → bin/go-rtl-sdr-mon-linux-amd64  (x86_64)
-make build-arm64    # → bin/go-rtl-sdr-mon-linux-arm64  (aarch64)
-make build-arm      # → bin/go-rtl-sdr-mon-linux-arm    (armv7)
+make build-amd64    # → bin/goether-sdr-linux-amd64  (x86_64)
+make build-arm64    # → bin/goether-sdr-linux-arm64  (aarch64)
+make build-arm      # → bin/goether-sdr-linux-arm    (armv7)
 make build-all      # All three architectures
 
 make dist           # Build all + package into tarballs in dist/
@@ -108,13 +108,13 @@ make dist           # Build all + package into tarballs in dist/
 
 ```bash
 # Defaults: device 0, 1.8 MHz sample rate, 102.8 MHz, port 8080
-./go-rtl-sdr-mon
+./goether-sdr
 
 # Custom parameters
-./go-rtl-sdr-mon -device 0 -freq 144500000 -samplerate 2400000 -port 8080 -ppm 1
+./goether-sdr -device 0 -freq 144500000 -samplerate 2400000 -port 8080 -ppm 1
 
 # Manual gain
-./go-rtl-sdr-mon -autogain=false -gain 248  # 24.8 dB (gqrx default)
+./goether-sdr -autogain=false -gain 248  # 24.8 dB (gqrx default)
 ```
 
 Open `https://localhost:8080` in your browser.
@@ -138,103 +138,42 @@ Open `https://localhost:8080` in your browser.
 
 ### REST
 
-| Method | Endpoint                 | Body                                  | Description                            |
-| ------ | ------------------------ | ------------------------------------- | -------------------------------------- |
-| GET    | `/api/device`            | —                                     | Active device info                     |
-| GET    | `/api/devices`           | —                                     | List available devices                 |
-| POST   | `/api/device/select`     | `{"id":"..."}`                        | Select / open a device                 |
-| GET    | `/api/status`            | —                                     | Receiver status & config               |
-| GET    | `/api/demods`            | —                                     | Available demodulator list             |
-| POST   | `/api/frequency`         | `{"frequency":100000000}`             | Set center frequency                   |
-| POST   | `/api/demod`             | `{"demod":"NFM"}`                     | Set demodulator                        |
-| POST   | `/api/filter`            | `{"low":-5000,"high":5000}`           | Set filter cutoffs                     |
-| POST   | `/api/filter-offset`     | `{"offset":0}`                        | Set filter offset                      |
-| POST   | `/api/filter-shape`      | `{"shape":"normal"}`                  | Set filter shape (soft/normal/sharp)   |
-| POST   | `/api/filter-preset`     | `{"preset":"normal"}`                 | Set filter preset (wide/normal/narrow) |
-| POST   | `/api/squelch`           | `{"level":-80}`                       | Set squelch level (dBFS)               |
-| POST   | `/api/agc`               | `{"enabled":true}`                    | Enable/disable AGC                     |
-| POST   | `/api/agc-preset`        | `{"preset":"medium"}`                 | Set AGC preset (off/slow/medium/fast)  |
-| POST   | `/api/gain`              | `{"gain":248}`                        | Set manual gain (0.1 dB)               |
-| POST   | `/api/auto-gain`         | `{"auto":true}`                       | Enable/disable SDR auto gain           |
-| POST   | `/api/freq-correction`   | `{"ppm":1}`                           | Set frequency correction               |
-| POST   | `/api/cw-offset`         | `{"offset":700}`                      | Set CW/BFO offset (Hz)                 |
-| POST   | `/api/spectrum-avg`      | `{"avg":0.3}`                         | Set FFT averaging factor               |
-| POST   | `/api/fft-size`          | `{"size":8192}`                       | Set FFT size                           |
-| POST   | `/api/fft-rate`          | `{"rate":25}`                         | Set FFT refresh rate (fps)             |
-| POST   | `/api/fft-max-hold`      | `{"enabled":true}`                    | Enable/disable max-hold                |
-| POST   | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR)  |
-| GET    | `/api/aircraft`          | —                                     | Current tracked aircraft list          |
-| GET    | `/api/lrpt/satellites`   | —                                     | List of Meteor-M LRPT satellites       |
+| Method | Endpoint                 | Body                                  | Description                             |
+| ------ | ------------------------ | ------------------------------------- | --------------------------------------- |
+| GET    | `/api/device`            | —                                     | Active device info                      |
+| GET    | `/api/devices`           | —                                     | List available devices                  |
+| POST   | `/api/device/select`     | `{"id":"..."}`                        | Select / open a device                  |
+| GET    | `/api/status`            | —                                     | Receiver status & config                |
+| GET    | `/api/demods`            | —                                     | Available demodulator list              |
+| POST   | `/api/frequency`         | `{"frequency":100000000}`             | Set center frequency                    |
+| POST   | `/api/demod`             | `{"demod":"NFM"}`                     | Set demodulator                         |
+| POST   | `/api/filter`            | `{"low":-5000,"high":5000}`           | Set filter cutoffs                      |
+| POST   | `/api/filter-offset`     | `{"offset":0}`                        | Set filter offset                       |
+| POST   | `/api/filter-shape`      | `{"shape":"normal"}`                  | Set filter shape (soft/normal/sharp)    |
+| POST   | `/api/filter-preset`     | `{"preset":"normal"}`                 | Set filter preset (wide/normal/narrow)  |
+| POST   | `/api/squelch`           | `{"level":-80}`                       | Set squelch level (dBFS)                |
+| POST   | `/api/agc`               | `{"enabled":true}`                    | Enable/disable AGC                      |
+| POST   | `/api/agc-preset`        | `{"preset":"medium"}`                 | Set AGC preset (off/slow/medium/fast)   |
+| POST   | `/api/gain`              | `{"gain":248}`                        | Set manual gain (0.1 dB)                |
+| POST   | `/api/auto-gain`         | `{"auto":true}`                       | Enable/disable SDR auto gain            |
+| POST   | `/api/freq-correction`   | `{"ppm":1}`                           | Set frequency correction                |
+| POST   | `/api/cw-offset`         | `{"offset":700}`                      | Set CW/BFO offset (Hz)                  |
+| POST   | `/api/spectrum-avg`      | `{"avg":0.3}`                         | Set FFT averaging factor                |
+| POST   | `/api/fft-size`          | `{"size":8192}`                       | Set FFT size                            |
+| POST   | `/api/fft-rate`          | `{"rate":25}`                         | Set FFT refresh rate (fps)              |
+| POST   | `/api/fft-max-hold`      | `{"enabled":true}`                    | Enable/disable max-hold                 |
+| POST   | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR)   |
+| GET    | `/api/aircraft`          | —                                     | Current tracked aircraft list           |
+| GET    | `/api/lrpt/satellites`   | —                                     | List of Meteor-M LRPT satellites        |
 | GET    | `/api/lrpt-stats`        | —                                     | LRPT decoder statistics + constellation |
-| POST   | `/api/lrpt-reset`        | `{}`                                  | Reset LRPT decoder state               |
+| POST   | `/api/lrpt-reset`        | `{}`                                  | Reset LRPT decoder state                |
 
 ### WebSocket
 
-| Endpoint           | Format                                                         | Description                                          |
-| ------------------ | -------------------------------------------------------------- | ---------------------------------------------------- |
-| `/api/ws/fft`      | Binary: `4-byte size` → `float32[]` frames                     | FFT spectrum data                                    |
-| `/api/ws/audio`    | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples | Audio PCM                                            |
-| `/api/ws/status`   | JSON                                                           | Receiver status updates (500 ms interval)            |
-| `/api/ws/aircraft` | JSON: `Aircraft[]`                                             | ADS-B aircraft positions (broadcast every 10 blocks) |
-| `/api/ws/lrpt`     | Binary: `u16 apid` + `u32 strip` + `u8 mcuIndex` + `u8 rsvd` + `896-byte pixels` (112×8) | Meteor-M LRPT image segments |
-
-## Project Structure
-
-```
-├── main.go                  # Entry point, CLI flags, server startup
-├── server.go                # HTTP API + WebSocket handlers
-├── Makefile                 # Build script (output → bin/)
-├── internal/
-│   ├── sdr/
-│   │   ├── device.go        # SDRDevice interface, DeviceManager
-│   │   ├── source.go        # RTL-SDR implementation of SDRDevice
-│   │   ├── receiver.go      # Top-level receiver orchestration (source hot-swap)
-│   │   ├── fft.go           # Custom radix-2 complex FFT
-│   │   ├── ddc.go           # Digital down-converter
-│   │   ├── filter.go        # FIR/IIR filter design (incl. complex band-pass)
-│   │   ├── agc.go           # Automatic gain control
-│   │   ├── resampler.go     # Anti-aliased audio resampler
-│   │   └── *_test.go        # Resampler / spectrum / filter tests
-│   ├── demod/
-│   │   ├── demod.go         # Demodulator interface & type enum
-│   │   ├── fm.go            # Narrow-band FM
-│   │   ├── wfm.go           # Wide-band FM (mono/stereo/OIRT)
-│   │   ├── am.go            # AM envelope detector
-│   │   ├── amsync.go        # AM synchronous detector (PLL)
-│   │   └── ssb.go           # SSB
-│   ├── adsb/
-│   │   ├── types.go         # Aircraft & Message structs
-│   │   ├── decoder.go       # IQ → ADS-B message detection pipeline
-│   │   ├── message.go       # Field extraction (callsign, altitude, etc.)
-│   │   ├── cpr.go           # Compact Position Reporting decoding
-│   │   ├── crc.go           # Mode S 24-bit CRC + error correction
-│   │   ├── tracker.go       # Multi-aircraft tracking
-│   │   └── *_test.go        # CRC / message / tracker tests
-│   └── lrpt/
-│       ├── types.go         # Satellite info, framing constants, image segment types
-│       ├── demod.go         # QPSK demodulator (AGC, Costas, RRC, Gardner, FFT acquisition)
-│       ├── viterbi.go       # Convolutional encoder + soft-decision Viterbi decoder
-│       ├── rs.go            # Reed-Solomon (255,223) decoder (CCSDS parameters)
-│       ├── deframer.go      # ASM correlator, phase-ambiguity resolution, PN derandomizer
-│       ├── packet.go        # VCDU/CCSDS packet reassembly, MSU-MR segment extraction
-│       ├── jpeg.go          # MSU-MR JPEG decoder (Huffman, dequantization, IDCT)
-│       ├── decoder.go       # Top-level decoder pipeline
-│       └── *_test.go        # Unit + end-to-end loopback tests (IQ → image)
-├── web/                     # Vue 3 + Reka UI frontend
-│   ├── src/
-│   │   ├── App.vue          # Main layout (top bar + tabs + waterfall/map)
-│   │   ├── components/      # Waterfall, FrequencyControl, ReceiverPanel,
-│   │   │                    # GainPanel, AudioPlayer, DeviceSelector,
-│   │   │                    # AircraftMap, AircraftPanel, LRPTPanel
-│   │   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
-│   │   │                    # useI18n, useAircraft, useDebounce, useLRPT
-│   │   └── styles/          # main.css, reka-ui.css
-│   └── dist/                # Build output (embedded via //go:embed)
-├── bin/                     # Compiled binaries
-├── dist/                    # Distribution tarballs (make dist)
-├── Dockerfile               # Multi-stage build (frontend + Go + CGO)
-├── .dockerignore
-├── .github/workflows/
-│   └── release.yml          # CI: multi-arch build + GitHub Release
-└── go.mod
-```
+| Endpoint           | Format                                                                                   | Description                                          |
+| ------------------ | ---------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `/api/ws/fft`      | Binary: `4-byte size` → `float32[]` frames                                               | FFT spectrum data                                    |
+| `/api/ws/audio`    | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples                           | Audio PCM                                            |
+| `/api/ws/status`   | JSON                                                                                     | Receiver status updates (500 ms interval)            |
+| `/api/ws/aircraft` | JSON: `Aircraft[]`                                                                       | ADS-B aircraft positions (broadcast every 10 blocks) |
+| `/api/ws/lrpt`     | Binary: `u16 apid` + `u32 strip` + `u8 mcuIndex` + `u8 rsvd` + `896-byte pixels` (112×8) | Meteor-M LRPT image segments                         |

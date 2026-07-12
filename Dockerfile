@@ -17,17 +17,17 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /web/dist ./web/dist
-RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /go-rtl-sdr-mon .
+RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /goether-sdr .
 
 # Stage 3: Export only the binary (for cross-compilation extraction via Makefile)
 FROM scratch AS export
-COPY --from=builder /go-rtl-sdr-mon /
+COPY --from=builder /goether-sdr /
 
 # Stage 4: Runtime image (for Docker deployment)
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     librtlsdr0 libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /go-rtl-sdr-mon /usr/local/bin/go-rtl-sdr-mon
+COPY --from=builder /goether-sdr /usr/local/bin/goether-sdr
 EXPOSE 8080
-ENTRYPOINT ["go-rtl-sdr-mon"]
+ENTRYPOINT ["goether-sdr"]

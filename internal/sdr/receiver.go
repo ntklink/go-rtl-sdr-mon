@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ntklink/go-rtl-sdr-mon/internal/adsb"
-	"github.com/ntklink/go-rtl-sdr-mon/internal/demod"
-	"github.com/ntklink/go-rtl-sdr-mon/internal/lrpt"
+	"github.com/ntklink/GoEther-SDR/internal/adsb"
+	"github.com/ntklink/GoEther-SDR/internal/demod"
+	"github.com/ntklink/GoEther-SDR/internal/lrpt"
 )
 
 // DemodType re-exports the demod type from the demod package for convenience.

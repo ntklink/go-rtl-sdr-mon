@@ -1,7 +1,7 @@
 .PHONY: all build web clean dev run help \
        build-amd64 build-arm64 build-arm build-all dist release
 
-BINARY_NAME := go-rtl-sdr-mon
+BINARY_NAME := goether-sdr
 BIN_DIR := bin
 DIST_DIR := dist
 WEB_DIR := web

@@ -3,7 +3,7 @@ web/dist
 web/node_modules
 
 # golang
-bin/go-rtl-sdr-mon*
+bin/goether-sdr*
 dist/*
 bin/cert.pem
 bin/key.pem

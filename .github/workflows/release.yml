@@ -52,22 +52,22 @@ jobs:
 
       - name: Rename binary
         run: |
-          mv ./out/go-rtl-sdr-mon ./go-rtl-sdr-mon-linux-${{ matrix.target }}
-          chmod +x ./go-rtl-sdr-mon-linux-${{ matrix.target }}
+          mv ./out/goether-sdr ./goether-sdr-linux-${{ matrix.target }}
+          chmod +x ./goether-sdr-linux-${{ matrix.target }}
 
       - name: Create tarball
-        run: tar czf go-rtl-sdr-mon-linux-${{ matrix.target }}.tar.gz go-rtl-sdr-mon-linux-${{ matrix.target }}
+        run: tar czf goether-sdr-linux-${{ matrix.target }}.tar.gz goether-sdr-linux-${{ matrix.target }}
 
       - name: Generate checksum
-        run: sha256sum go-rtl-sdr-mon-linux-${{ matrix.target }}.tar.gz > go-rtl-sdr-mon-linux-${{ matrix.target }}.tar.gz.sha256
+        run: sha256sum goether-sdr-linux-${{ matrix.target }}.tar.gz > goether-sdr-linux-${{ matrix.target }}.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: go-rtl-sdr-mon-linux-${{ matrix.target }}
+          name: goether-sdr-linux-${{ matrix.target }}
           path: |
-            go-rtl-sdr-mon-linux-${{ matrix.target }}.tar.gz
-            go-rtl-sdr-mon-linux-${{ matrix.target }}.tar.gz.sha256
+            goether-sdr-linux-${{ matrix.target }}.tar.gz
+            goether-sdr-linux-${{ matrix.target }}.tar.gz.sha256
 
   release:
     name: Create Release
@@ -82,7 +82,7 @@ jobs:
         with:
           path: ./assets
           merge-multiple: true
-          pattern: go-rtl-sdr-mon-linux-*
+          pattern: goether-sdr-linux-*
 
       - name: Determine tag
         id: tag
