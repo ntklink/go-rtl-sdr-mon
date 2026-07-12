@@ -63,7 +63,6 @@ interface MarkerState {
   lon: number
   track: number
   selected: boolean
-  popupHtml: string
 }
 const markerState: Map<string, MarkerState> = new Map()
 
@@ -155,18 +154,6 @@ function updateMarkers() {
     const hasVel = ac.speed > 0
     const rotDeg = hasVel ? ac.track : 0
 
-    // Create popup content
-    const callsign = ac.callsign || '---'
-    const popupHtml = `
-      <div style="font-size:13px;line-height:1.6;">
-        <b>${callsign}</b><br>
-        ICAO: ${ac.icao}<br>
-        Alt: ${ac.altitude > 0 ? ac.altitude + ' ft' : '---'}<br>
-        Spd: ${hasVel ? ac.speed.toFixed(0) + ' kt' : '---'}<br>
-        Trk: ${hasVel ? ac.track.toFixed(0) + '°' : '---'}<br>
-        ${ac.verticalRate !== 0 ? 'V/S: ' + ac.verticalRate + ' ft/min' : ''}
-      </div>`
-
     // Create or update marker
     let marker = markers.get(ac.icao)
     const prev = markerState.get(ac.icao)
@@ -178,8 +165,8 @@ function updateMarkers() {
         iconAnchor: [12, 12],
       })
       marker = L.marker(pos, { icon }).addTo(map!)
-      marker.bindPopup(popupHtml)
       // Click a marker to select that aircraft (toggle off if already selected).
+      // Selection details are shown in the top-right info card, so no popup.
       marker.on('click', () => {
         selectedICAO.value = selectedICAO.value === ac.icao ? '' : ac.icao
       })
@@ -191,9 +178,6 @@ function updateMarkers() {
       if (prev && (prev.lat !== ac.latitude || prev.lon !== ac.longitude)) {
         marker.setLatLng(pos)
       }
-      if (prev && prev.popupHtml !== popupHtml) {
-        marker.setPopupContent(popupHtml)
-      }
       if (!prev || prev.track !== rotDeg || prev.selected !== selected) {
         marker.setIcon(L.divIcon({
           className: 'aircraft-marker',
@@ -204,7 +188,7 @@ function updateMarkers() {
       }
     }
 
-    markerState.set(ac.icao, { lat: ac.latitude, lon: ac.longitude, track: rotDeg, selected, popupHtml })
+    markerState.set(ac.icao, { lat: ac.latitude, lon: ac.longitude, track: rotDeg, selected })
   }
 
   // Remove markers for aircraft no longer tracked
