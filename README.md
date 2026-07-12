@@ -177,3 +177,28 @@ Open `https://localhost:8080` in your browser.
 | `/api/ws/status`   | JSON                                                                                     | Receiver status updates (500 ms interval)            |
 | `/api/ws/aircraft` | JSON: `Aircraft[]`                                                                       | ADS-B aircraft positions (broadcast every 10 blocks) |
 | `/api/ws/lrpt`     | Binary: `u16 apid` + `u32 strip` + `u8 mcuIndex` + `u8 rsvd` + `896-byte pixels` (112×8) | Meteor-M LRPT image segments                         |
+
+## License
+
+This project is licensed under the [GNU General Public License v2.0](LICENSE).
+
+```
+GoEther-SDR — A Go-based SDR receiver with web UI
+Copyright (C) 2024  GoEther-SDR contributors
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+```
+
+See the [LICENSE](LICENSE) file for the full text of the GPLv2.
