@@ -48,8 +48,8 @@ export function useApi() {
     getAircraft: () => getJSON('/aircraft'),
     getAircraftHistory: () => getJSON('/aircraft/history'),
     getAllAircraft: () => getJSON('/aircraft/all'),
-    getNOAASatellites: () => getJSON('/noaa/satellites'),
-    getAPTStats: () => getJSON('/apt-stats'),
-    resetAPT: () => postJSON('/apt-reset', {}),
+    getLRPTSatellites: () => getJSON('/lrpt/satellites'),
+    getLRPTStats: () => getJSON('/lrpt-stats'),
+    resetLRPT: () => postJSON('/lrpt-reset', {}),
   }
 }

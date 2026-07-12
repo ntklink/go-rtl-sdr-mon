@@ -40,7 +40,7 @@
             <TabsTrigger value="gain" class="reka-tabs-trigger">{{ t('tab.gain') }}</TabsTrigger>
             <TabsTrigger value="audio" class="reka-tabs-trigger">{{ t('tab.audio') }}</TabsTrigger>
             <TabsTrigger value="adsb" class="reka-tabs-trigger">{{ t('adsb.tab') }}</TabsTrigger>
-            <TabsTrigger value="noaa" class="reka-tabs-trigger">{{ t('noaa.tab') }}</TabsTrigger>
+            <TabsTrigger value="lrpt" class="reka-tabs-trigger">{{ t('lrpt.tab') }}</TabsTrigger>
           </TabsList>
           <TabsContent value="receiver" force-mount class="reka-tabs-content">
             <ReceiverPanel :demod="status.Demod" :filter-low="status.FilterLow" :filter-high="status.FilterHigh"
@@ -55,8 +55,8 @@
           <TabsContent value="adsb" force-mount class="reka-tabs-content">
             <AircraftPanel />
           </TabsContent>
-          <TabsContent value="noaa" force-mount class="reka-tabs-content">
-            <NoAAPanel />
+          <TabsContent value="lrpt" force-mount class="reka-tabs-content">
+            <LRPTPanel />
           </TabsContent>
         </TabsRoot>
       </div>
@@ -75,7 +75,7 @@ import GainPanel from './components/GainPanel.vue'
 import AudioPlayer from './components/AudioPlayer.vue'
 import AircraftMap from './components/AircraftMap.vue'
 import AircraftPanel from './components/AircraftPanel.vue'
-import NoAAPanel from './components/NoAAPanel.vue'
+import LRPTPanel from './components/LRPTPanel.vue'
 import { useApi } from './composables/useApi'
 import { useStatus } from './composables/useStatus'
 import { useI18n } from './composables/useI18n'
@@ -85,17 +85,17 @@ const { status } = useStatus()
 const { t, locale, setLocale } = useI18n()
 
 const isADSB = computed(() => status.value.Demod === 'ADS-B')
-const isNOAA = computed(() => status.value.Demod === 'NOAA')
+const isLRPT = computed(() => status.value.Demod === 'LRPT')
 
 const activeTab = ref('receiver')
-// Stores the frequency before entering ADS-B/NOAA mode, restored on exit
+// Stores the frequency before entering ADS-B/LRPT mode, restored on exit
 let prevFrequency: number | null = null
 
 watch(isADSB, (adsb) => {
   if (adsb) activeTab.value = 'adsb'
 })
-watch(isNOAA, (noaa) => {
-  if (noaa) activeTab.value = 'noaa'
+watch(isLRPT, (lrpt) => {
+  if (lrpt) activeTab.value = 'lrpt'
 })
 
 function toggleLocale() {
@@ -112,11 +112,11 @@ async function setFrequency(freq: number) {
 
 async function setDemod(demod: string) {
   const oldDemod = status.value.Demod
-  const wasSpecial = oldDemod === 'ADS-B' || oldDemod === 'NOAA'
-  const isSpecial = demod === 'ADS-B' || demod === 'NOAA'
+  const wasSpecial = oldDemod === 'ADS-B' || oldDemod === 'LRPT'
+  const isSpecial = demod === 'ADS-B' || demod === 'LRPT'
 
   try {
-    // Save current frequency before entering ADS-B/NOAA from a normal mode
+    // Save current frequency before entering ADS-B/LRPT from a normal mode
     if (!wasSpecial && isSpecial) {
       prevFrequency = status.value.CenterFreq
     }
@@ -127,12 +127,12 @@ async function setDemod(demod: string) {
     if (demod === 'ADS-B' && status.value.CenterFreq !== 1090000000) {
       await api.setFrequency(1090000000)
     }
-    // Auto-tune to NOAA-19 (137.1 MHz) when NOAA is selected
-    if (demod === 'NOAA' && (status.value.CenterFreq < 137000000 || status.value.CenterFreq > 138000000)) {
-      await api.setFrequency(137100000)
+    // Auto-tune to Meteor-M N2-3 (137.9 MHz) when LRPT is selected
+    if (demod === 'LRPT' && (status.value.CenterFreq < 137000000 || status.value.CenterFreq > 138000000)) {
+      await api.setFrequency(137900000)
     }
 
-    // Restore previous frequency when leaving ADS-B/NOAA back to a normal mode
+    // Restore previous frequency when leaving ADS-B/LRPT back to a normal mode
     if (wasSpecial && !isSpecial && prevFrequency !== null) {
       await api.setFrequency(prevFrequency)
       prevFrequency = null

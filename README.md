@@ -1,6 +1,6 @@
 # Go RTL-SDR Monitor
 
-A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment. Supports broadcast FM/AM/SSB/CW, ADS-B aircraft tracking. Tested with the RTL-SDR Blog V4 & V3 dongles (RTL2832U + R828D, TCXO, bias-tee, HF).
+A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), with a web UI for remote operation and single-binary deployment. Supports broadcast FM/AM/SSB/CW, ADS-B aircraft tracking, and Meteor-M LRPT weather satellite imagery. Tested with the RTL-SDR Blog V4 & V3 dongles (RTL2832U + R828D, TCXO, bias-tee, HF).
 
 ![Overview](docs/image-overview.jpg)
 
@@ -12,9 +12,9 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 - **Web UI** — Vue 3 + [Reka UI](https://github.com/unovue/reka-ui), embedded into the Go binary via `//go:embed`
 - **Real-time Spectrum & Waterfall** — Canvas-rendered, streamed over WebSocket with configurable FFT size, rate, averaging, and max-hold
 - **Browser Audio Playback** — Demodulated PCM audio streamed over WebSocket, played with the Web Audio API
-- **14 Demodulation Modes** — OFF, Raw I/Q, AM, AM-Sync, LSB, USB, CW-L, CW-U, NFM, WFM, WFM-Stereo, WFM-OIRT, ADS-B, NOAA APT (gqrx-compatible + satellite)
+- **14 Demodulation Modes** — OFF, Raw I/Q, AM, AM-Sync, LSB, USB, CW-L, CW-U, NFM, WFM, WFM-Stereo, WFM-OIRT, ADS-B, LRPT (gqrx-compatible + satellite)
 - **ADS-B Reception** — Decode Mode S Extended Squitter (1090 MHz) messages: Manchester decoding, CRC verification with single-bit error correction, CPR (Compact Position Reporting) position decoding, aircraft tracking with callsign/altitude/speed/heading/vertical-rate extraction
-- **NOAA APT Weather Satellite** — Decode APT (Automatic Picture Transmission) imagery from NOAA polar-orbiting satellites (NOAA-15/18/19 at 137 MHz): 2.4 kHz subcarrier AM demodulation, sync frame detection, real-time image line-by-line rendering, satellite frequency quick-select, PNG export
+- **Meteor-M LRPT Weather Satellite** — Full digital decode of LRPT (Low Rate Picture Transmission) imagery from Meteor-M N2-3/N2-4 (137 MHz, the successor to NOAA APT which ended with the POES decommissioning): QPSK 72k demodulation (RRC matched filter, Costas loop, Gardner timing recovery, FFT-based carrier acquisition), soft-decision Viterbi (K=7, r=1/2), CCSDS deframing with derandomization, Reed-Solomon (255,223)×4 error correction, CCSDS space packet reassembly, MSU-MR JPEG decoding (per-channel APID 64-69), live constellation diagram, real-time segment-by-segment rendering, per-channel PNG export
 - **Live Aircraft Map** — Leaflet-based map showing nearby aircraft positions with locale-aware tile layers (OpenStreetMap / AutoNavi); auto-requests browser geolocation for receiver position
 - **Full DSP Chain** — DDC, FIR bandpass filtering, AGC with presets, anti-aliased audio resampling
 - **gqrx-compatible Parameters** — AGC presets (Off/Slow/Medium/Fast), filter presets (Wide/Normal/Narrow), filter shapes (Soft/Normal/Sharp), CW offset, WFM de-emphasis
@@ -27,7 +27,7 @@ A Go-based SDR receiver inspired by [gqrx](https://github.com/gqrx-sdr/gqrx), wi
 RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canvas
                       └→ DDC → Bandpass Filter → Demod → AGC → Resampler → WebSocket → Web Audio API
                       └→ ADS-B Decoder → Aircraft Tracker → WebSocket → Leaflet Map
-                      └→ FM Demod → APT Decoder (2.4kHz AM subcarrier) → WebSocket → Canvas Image
+                      └→ LRPT Decoder (QPSK → Viterbi → RS → JPEG) → WebSocket → Canvas Image
 ```
 
 ### DSP Signal Chain
@@ -48,7 +48,11 @@ RTL-SDR → IQ Stream → ┌→ FFT (spectrum/waterfall) → WebSocket → Canv
 | ADS-B CPR          | `internal/adsb/cpr.go`      | Compact Position Reporting (global + relative) decoding                      |
 | ADS-B CRC          | `internal/adsb/crc.go`      | Mode S 24-bit CRC with single-bit error correction                           |
 | ADS-B Tracker      | `internal/adsb/tracker.go`  | Multi-aircraft tracking, ICAO-based state merging, CPR caching               |
-| NOAA APT           | `internal/noaa/apt.go`      | 2.4 kHz subcarrier AM demod, sync detection, image assembly                  |
+| LRPT Demodulator   | `internal/lrpt/demod.go`    | QPSK 72k: AGC, Costas loop, RRC matched filter, Gardner timing, FFT carrier acquisition |
+| LRPT FEC           | `internal/lrpt/viterbi.go` / `rs.go` | Soft-decision Viterbi (K=7, r=1/2, CCSDS 0171/0133); Reed-Solomon (255,223) ×4 interleave |
+| LRPT Deframer      | `internal/lrpt/deframer.go` | ASM correlation with 8-fold QPSK ambiguity resolution, PN derandomization    |
+| LRPT Packets       | `internal/lrpt/packet.go`   | VCDU → CCSDS space packet reassembly, MSU-MR segment extraction              |
+| LRPT JPEG          | `internal/lrpt/jpeg.go`     | MSU-MR JPEG: Annex K Huffman tables, quality-scaled dequantization, IDCT     |
 
 ## Build
 
@@ -160,9 +164,9 @@ Open `https://localhost:8080` in your browser.
 | POST   | `/api/fft-max-hold`      | `{"enabled":true}`                    | Enable/disable max-hold                |
 | POST   | `/api/receiver-position` | `{"latitude":39.9,"longitude":116.4}` | Set receiver position (for ADS-B CPR)  |
 | GET    | `/api/aircraft`          | —                                     | Current tracked aircraft list          |
-| GET    | `/api/noaa/satellites`   | —                                     | List of NOAA APT satellites            |
-| GET    | `/api/apt-stats`         | —                                     | APT decoder statistics                 |
-| POST   | `/api/apt-reset`         | `{}`                                  | Clear APT image buffer                 |
+| GET    | `/api/lrpt/satellites`   | —                                     | List of Meteor-M LRPT satellites       |
+| GET    | `/api/lrpt-stats`        | —                                     | LRPT decoder statistics + constellation |
+| POST   | `/api/lrpt-reset`        | `{}`                                  | Reset LRPT decoder state               |
 
 ### WebSocket
 
@@ -172,7 +176,7 @@ Open `https://localhost:8080` in your browser.
 | `/api/ws/audio`    | Binary: `1-byte channels` + `4-byte count` + `int16[]` samples | Audio PCM                                            |
 | `/api/ws/status`   | JSON                                                           | Receiver status updates (500 ms interval)            |
 | `/api/ws/aircraft` | JSON: `Aircraft[]`                                             | ADS-B aircraft positions (broadcast every 10 blocks) |
-| `/api/ws/apt`      | Binary: `4-byte lineNum` + `2080-byte pixels`                  | NOAA APT image lines                                 |
+| `/api/ws/lrpt`     | Binary: `u16 apid` + `u32 strip` + `u8 mcuIndex` + `u8 rsvd` + `896-byte pixels` (112×8) | Meteor-M LRPT image segments |
 
 ## Project Structure
 
@@ -206,17 +210,24 @@ Open `https://localhost:8080` in your browser.
 │   │   ├── crc.go           # Mode S 24-bit CRC + error correction
 │   │   ├── tracker.go       # Multi-aircraft tracking
 │   │   └── *_test.go        # CRC / message / tracker tests
-│   └── noaa/
-│       ├── types.go         # Satellite info, APT line/image types, pixel geometry
-│       └── apt.go           # APT decoder: 2.4kHz subcarrier AM demod, sync detection, image assembly
+│   └── lrpt/
+│       ├── types.go         # Satellite info, framing constants, image segment types
+│       ├── demod.go         # QPSK demodulator (AGC, Costas, RRC, Gardner, FFT acquisition)
+│       ├── viterbi.go       # Convolutional encoder + soft-decision Viterbi decoder
+│       ├── rs.go            # Reed-Solomon (255,223) decoder (CCSDS parameters)
+│       ├── deframer.go      # ASM correlator, phase-ambiguity resolution, PN derandomizer
+│       ├── packet.go        # VCDU/CCSDS packet reassembly, MSU-MR segment extraction
+│       ├── jpeg.go          # MSU-MR JPEG decoder (Huffman, dequantization, IDCT)
+│       ├── decoder.go       # Top-level decoder pipeline
+│       └── *_test.go        # Unit + end-to-end loopback tests (IQ → image)
 ├── web/                     # Vue 3 + Reka UI frontend
 │   ├── src/
 │   │   ├── App.vue          # Main layout (top bar + tabs + waterfall/map)
 │   │   ├── components/      # Waterfall, FrequencyControl, ReceiverPanel,
 │   │   │                    # GainPanel, AudioPlayer, DeviceSelector,
-│   │   │                    # AircraftMap, AircraftPanel, NoAAPanel
+│   │   │                    # AircraftMap, AircraftPanel, LRPTPanel
 │   │   ├── composables/     # useApi, useStatus, useWaterfall, useAudio,
-│   │   │                    # useI18n, useAircraft, useDebounce, useNoAA
+│   │   │                    # useI18n, useAircraft, useDebounce, useLRPT
 │   │   └── styles/          # main.css, reka-ui.css
 │   └── dist/                # Build output (embedded via //go:embed)
 ├── bin/                     # Compiled binaries

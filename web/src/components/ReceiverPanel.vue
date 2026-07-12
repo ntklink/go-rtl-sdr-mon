@@ -100,7 +100,7 @@ const emit = defineEmits<{
   'update:filter': [low: number, high: number]
 }>()
 
-const demods = ['OFF', 'Raw I/Q', 'AM', 'AM-Sync', 'LSB', 'USB', 'CW-L', 'CW-U', 'NFM', 'WFM', 'WFM-Stereo', 'WFM-OIRT', 'ADS-B', 'NOAA']
+const demods = ['OFF', 'Raw I/Q', 'AM', 'AM-Sync', 'LSB', 'USB', 'CW-L', 'CW-U', 'NFM', 'WFM', 'WFM-Stereo', 'WFM-OIRT', 'ADS-B', 'LRPT']
 const squelchLevel = ref(-150)
 const filterShape = ref('normal')
 

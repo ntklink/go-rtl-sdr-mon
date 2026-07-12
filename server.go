@@ -21,7 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/ntklink/go-rtl-sdr-mon/internal/noaa"
+	"github.com/ntklink/go-rtl-sdr-mon/internal/lrpt"
 	"github.com/ntklink/go-rtl-sdr-mon/internal/sdr"
 )
 
@@ -145,7 +145,7 @@ func fileExists(path string) bool {
 func demodOptions() []string {
 	return []string{
 		"OFF", "Raw I/Q", "AM", "AM-Sync", "LSB", "USB",
-		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT", "ADS-B", "NOAA",
+		"CW-L", "CW-U", "NFM", "WFM", "WFM-Stereo", "WFM-OIRT", "ADS-B", "LRPT",
 	}
 }
 
@@ -214,11 +214,11 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	api.GET("/aircraft/all", s.handleGetAllAircraft)
 	api.GET("/adsb-stats", s.handleADSBStats)
 
-	// NOAA APT
-	api.GET("/ws/apt", s.handleWSAPT)
-	api.GET("/noaa/satellites", s.handleGetNOAASatellites)
-	api.GET("/apt-stats", s.handleAPTStats)
-	api.POST("/apt-reset", s.handleResetAPT)
+	// Meteor-M LRPT
+	api.GET("/ws/lrpt", s.handleWSLRPT)
+	api.GET("/lrpt/satellites", s.handleGetLRPTSatellites)
+	api.GET("/lrpt-stats", s.handleLRPTStats)
+	api.POST("/lrpt-reset", s.handleResetLRPT)
 }
 
 // --- REST API Handlers ---
@@ -384,8 +384,8 @@ func (s *Server) handleSetDemod(c echo.Context) error {
 		dt = sdr.DemodWFMOirt
 	case "ADS-B", "adsb", "ads-b", "ADS":
 		dt = sdr.DemodADSB
-	case "NOAA", "noaa", "apt":
-		dt = sdr.DemodNOAA
+	case "LRPT", "lrpt", "NOAA", "noaa":
+		dt = sdr.DemodLRPT
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown demod type"})
 	}
@@ -1008,30 +1008,36 @@ func (s *Server) handleADSBStats(c echo.Context) error {
 	})
 }
 
-// handleGetNOAASatellites returns the list of NOAA satellites transmitting APT.
-func (s *Server) handleGetNOAASatellites(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]any{"satellites": noaa.Satellites()})
+// handleGetLRPTSatellites returns the list of Meteor-M satellites
+// transmitting LRPT.
+func (s *Server) handleGetLRPTSatellites(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]any{"satellites": lrpt.Satellites()})
 }
 
-// handleAPTStats returns APT decoder statistics.
-func (s *Server) handleAPTStats(c echo.Context) error {
-	lines, sync, signal := s.receiver.GetAPTStats()
+// handleLRPTStats returns LRPT decoder statistics plus a constellation
+// snapshot (recent soft symbols, interleaved I,Q).
+func (s *Server) handleLRPTStats(c echo.Context) error {
+	stats := s.receiver.GetLRPTStats()
 	return c.JSON(http.StatusOK, map[string]any{
-		"lines":       lines,
-		"sync":        sync,
-		"signalLevel": signal,
+		"stats":         stats,
+		"constellation": s.receiver.GetLRPTConstellation(),
 	})
 }
 
-// handleResetAPT clears the APT decoder state and image buffer.
-func (s *Server) handleResetAPT(c echo.Context) error {
-	s.receiver.ResetAPT()
+// handleResetLRPT clears the LRPT decoder state.
+func (s *Server) handleResetLRPT(c echo.Context) error {
+	s.receiver.ResetLRPT()
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleWSAPT streams APT image lines over WebSocket.
-// Binary protocol: [4 bytes lineNum (uint32 LE)] [2080 bytes pixel data (uint8)]
-func (s *Server) handleWSAPT(c echo.Context) error {
+// handleWSLRPT streams decoded LRPT image segments over WebSocket.
+// Binary protocol (little-endian):
+//
+//	[u16 apid] [u32 strip] [u8 mcuIndex] [u8 reserved] [896 bytes pixels]
+//
+// Pixels are 8 rows × 112 columns (14 MCUs) of 8-bit grayscale; the
+// segment's top-left corner is at (mcuIndex*8, strip*8).
+func (s *Server) handleWSLRPT(c echo.Context) error {
 	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		return err
@@ -1039,22 +1045,23 @@ func (s *Server) handleWSAPT(c echo.Context) error {
 	defer func() { _ = ws.Close() }()
 	startWSReadPump(ws)
 
-	aptCh := s.receiver.SubscribeAPT()
-	defer s.receiver.UnsubscribeAPT(aptCh)
+	segCh := s.receiver.SubscribeLRPT()
+	defer s.receiver.UnsubscribeLRPT(segCh)
 
 	ticker := time.NewTicker(wsPingPeriod)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case line, ok := <-aptCh:
+		case seg, ok := <-segCh:
 			if !ok {
 				return nil
 			}
-			// 4 bytes line number + 2080 bytes pixel data
-			buf := make([]byte, 4+len(line.Pixels))
-			binary.LittleEndian.PutUint32(buf[0:4], uint32(line.LineNum))
-			copy(buf[4:], line.Pixels)
+			buf := make([]byte, 8+len(seg.Pixels))
+			binary.LittleEndian.PutUint16(buf[0:2], uint16(seg.APID))
+			binary.LittleEndian.PutUint32(buf[2:6], uint32(seg.Strip))
+			buf[6] = byte(seg.MCUIndex)
+			copy(buf[8:], seg.Pixels)
 			if err := wsWriteMessage(ws, websocket.BinaryMessage, buf); err != nil {
 				return nil
 			}

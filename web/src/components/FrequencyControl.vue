@@ -37,7 +37,7 @@ const editInput = ref<HTMLInputElement | null>(null)
 function defaultUnitForDemod(demod: string | undefined): Unit {
   if (!demod) return 'MHz'
   // VHF/UHF modes — frequencies typically in MHz
-  if (['NFM', 'WFM', 'WFM-Stereo', 'WFM-OIRT', 'ADS-B', 'NOAA'].includes(demod)) return 'MHz'
+  if (['NFM', 'WFM', 'WFM-Stereo', 'WFM-OIRT', 'ADS-B', 'LRPT'].includes(demod)) return 'MHz'
   // AM/SSB/CW — AM broadcast (kHz) and HF bands read naturally in kHz
   if (['AM', 'AM-Sync', 'LSB', 'USB', 'CW-L', 'CW-U'].includes(demod)) return 'kHz'
   return 'MHz'
