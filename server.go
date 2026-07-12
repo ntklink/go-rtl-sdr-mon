@@ -21,8 +21,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
-	"github.com/ntklink/GoEther-SDR/internal/lrpt"
-	"github.com/ntklink/GoEther-SDR/internal/sdr"
+	"github.com/ntklink/goether-sdr/internal/lrpt"
+	"github.com/ntklink/goether-sdr/internal/sdr"
 )
 
 // --- Utility functions (migrated from console.go) ---

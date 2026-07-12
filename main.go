@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/ntklink/GoEther-SDR/internal/sdr"
+	"github.com/ntklink/goether-sdr/internal/sdr"
 )
 
 //go:embed web/dist/*
