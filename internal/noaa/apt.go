@@ -11,6 +11,20 @@ type biquad struct {
 	z1, z2     float64 // state variables
 }
 
+// newBandpass creates a constant-0dB-peak-gain bandpass biquad (RBJ cookbook).
+func newBandpass(fs, f0, q float64) *biquad {
+	w0 := 2 * math.Pi * f0 / fs
+	alpha := math.Sin(w0) / (2 * q)
+	a0 := 1 + alpha
+	return &biquad{
+		b0: alpha / a0,
+		b1: 0,
+		b2: -alpha / a0,
+		a1: -2 * math.Cos(w0) / a0,
+		a2: (1 - alpha) / a0,
+	}
+}
+
 func newLowpass(fs, f0, q float64) *biquad {
 	w0 := 2 * math.Pi * f0 / fs
 	alpha := math.Sin(w0) / (2 * q)
@@ -48,6 +62,17 @@ func (b *biquad) process(x float64) float64 {
 //  3. Lowpass at 2080 Hz (pixel Nyquist) to smooth the envelope
 //  4. Linear-interpolated resampling to the 4160 Hz pixel rate
 //  5. Per-line sync-A correlation to keep rows aligned
+
+// Sync correlation thresholds.  Noise scores on the 28-sample normalized
+// correlation have a std-dev of ≈1/√28 ≈ 0.19, so the acquisition threshold
+// sits at ≈3.4σ and the tracking threshold at ≈1.8σ.
+const (
+	syncAcquireThreshold = 0.65 // minimum correlation to count an acquisition hit
+	syncAcquireStreak    = 3    // consecutive line-spaced hits required to lock
+	syncTrackThreshold   = 0.35 // minimum correlation to trust sync while locked
+	syncLossLines        = 16   // consecutive weak lines (8 s) before unlocking
+)
+
 type APTDecoder struct {
 	sampleRate float64 // input audio rate (typically 48000)
 
@@ -79,11 +104,21 @@ type APTDecoder struct {
 	// Doppler / sample-rate tracking
 	sppCorrection float64
 
-	// Signal level (EMA of envelope, for diagnostics)
-	signalLevel float64
+	// Carrier detection: power of the 2.4 kHz subcarrier vs. total audio
+	// power.  Their ratio is the reported signal level — unlike a plain
+	// envelope EMA it stays near zero on pure FM-demodulated noise, which
+	// is broadband, while a real APT subcarrier concentrates power in the
+	// narrow bandpass.
+	bpCarrier  *biquad
+	dcLevel    float64 // slow DC estimate of the input audio
+	carrierPow float64 // EMA of bandpass output power
+	totalPow   float64 // EMA of total (DC-removed) audio power
 
 	// Consecutive sync hits before locking
 	syncStreak int
+
+	// Consecutive weak-sync lines while locked (for unlock on signal loss)
+	syncMiss int
 
 	// Brightness reference (slow peak tracker for consistent scaling)
 	peakEnv float64
@@ -117,6 +152,12 @@ func NewAPTDecoder(sampleRate float64) *APTDecoder {
 	d.lpEnvelope1 = newLowpass(sampleRate, 2080, 0.707)
 	d.lpEnvelope2 = newLowpass(sampleRate, 2080, 0.707)
 
+	// Narrow bandpass at the 2.4 kHz subcarrier for carrier detection.
+	// Q=20 → ~120 Hz bandwidth: wide enough to hold the carrier despite
+	// doppler (< ±4 Hz on the subcarrier), narrow enough that broadband
+	// noise contributes little power.
+	d.bpCarrier = newBandpass(sampleRate, 2400, 20)
+
 	// Sync A reference: 7 cycles of 1040 Hz at 4160 Hz pixel rate = 4
 	// samples/cycle.  Square wave with values 0 and 1 (matching the
 	// non-negative envelope signal, per noaa-apt's generate_sync_frame).
@@ -138,7 +179,16 @@ func (d *APTDecoder) Process(samples []float64) []APTLine {
 	var completed []APTLine
 
 	for _, s := range samples {
-		// 1. DC-removal lowpass (removes DC offset + noise above 5 kHz)
+		// Carrier detection: compare 2.4 kHz narrowband power against
+		// total audio power (DC removed so tuning offsets don't inflate
+		// the denominator).  Time constant ≈ 20 ms at 48 kHz.
+		d.dcLevel = d.dcLevel*0.9999 + s*0.0001
+		ac := s - d.dcLevel
+		c := d.bpCarrier.process(ac)
+		d.carrierPow = d.carrierPow*0.999 + c*c*0.001
+		d.totalPow = d.totalPow*0.999 + ac*ac*0.001
+
+		// 1. Anti-alias lowpass (removes noise above 5 kHz)
 		filtered := d.lpDcRemoval.process(s)
 
 		// 2. Coherent AM demodulation (apt137 formula).  This extracts
@@ -151,9 +201,6 @@ func (d *APTDecoder) Process(samples []float64) []APTLine {
 		// 3. Post-demod lowpass at pixel Nyquist (2080 Hz)
 		env = d.lpEnvelope1.process(env)
 		env = d.lpEnvelope2.process(env)
-
-		// Track signal level (EMA of envelope) for diagnostics.
-		d.signalLevel = d.signalLevel*0.999 + env*0.001
 
 		// 4. Resample to pixel rate (4160 Hz) via linear interpolation.
 		d.phase += 1.0
@@ -218,14 +265,15 @@ func (d *APTDecoder) tryExtractLines() []APTLine {
 		}
 
 		if !d.syncLocked {
-			// Before first lock, require a strong sync hit.  The
-			// threshold of 0.55 with a 32-sample pattern over a ±16
-			// search window (33 positions) keeps the false-positive
-			// rate negligible (≈0.3% per line for pure noise, since
-			// 1/√32 ≈ 0.18 is the noise correlation std-dev).
-			// Additionally require 2 consecutive hits before locking
-			// to further suppress noise-only "snow" images.
-			if bestScore < 0.55 {
+			// Before first lock, require a strong sync hit.  While
+			// unlocked the search effectively slides over every pixel
+			// position (lineStart++ on each miss, 4160/s), so the
+			// threshold must be high enough that pure noise almost
+			// never crosses it: 0.65 ≈ 3.4σ for the 28-sample
+			// correlation.  Requiring syncAcquireStreak consecutive
+			// hits at exact one-line spacing then makes false locks
+			// on noise-only "snow" negligible.
+			if bestScore < syncAcquireThreshold {
 				d.syncStreak = 0
 				d.lineStart++
 				if d.lineStart > len(d.pixelStream)-LinePixels-syncLen {
@@ -234,21 +282,33 @@ func (d *APTDecoder) tryExtractLines() []APTLine {
 				continue
 			}
 			d.syncStreak++
-			if d.syncStreak < 2 {
-				// First hit: advance to the candidate position but
-				// don't lock yet — wait for a second confirmation.
+			if d.syncStreak < syncAcquireStreak {
+				// Candidate hit: advance to it, but don't lock until
+				// enough consecutive line-spaced confirmations.
 				d.lineStart = bestPos
 				d.pruneStream()
 				continue
 			}
 			d.syncLocked = true
+			d.syncMiss = 0
 			d.syncFound++
 		} else {
-			// Already locked: a very weak score means sync was lost
-			// (e.g. a fade).  Fall back to nominal spacing.
-			if bestScore < 0.15 {
+			if bestScore < syncTrackThreshold {
+				// Weak correlation: keep nominal line spacing so a
+				// short fade doesn't tear the image, but count the
+				// miss — after syncLossLines consecutive misses the
+				// signal is gone, so unlock and stop emitting lines
+				// instead of scrolling out noise forever.
+				d.syncMiss++
+				if d.syncMiss >= syncLossLines {
+					d.syncLocked = false
+					d.syncStreak = 0
+					d.syncMiss = 0
+					continue
+				}
 				bestPos = d.lineStart + LinePixels
 			} else {
+				d.syncMiss = 0
 				d.syncFound++
 			}
 		}
@@ -374,12 +434,17 @@ func (d *APTDecoder) pruneStream() {
 }
 
 // Stats returns decoder statistics: decoded line count, sync detection
-// count, and the current 2.4 kHz subcarrier signal level (0–1 scale, EMA of
-// the envelope amplitude).  A near-zero signalLevel means no satellite
+// count, and the current signal level.  The signal level is the fraction of
+// audio power concentrated in the 2.4 kHz APT subcarrier (0–1): pure
+// FM-demodulated noise measures well under 0.02, while a real APT signal
+// typically measures 0.1 or higher.  A near-zero level means no satellite
 // signal is being received (antenna/frequency/timing issue), while a high
-// signalLevel with sync=0 suggests a decoder problem.
+// level with sync=0 suggests a decoder problem.
 func (d *APTDecoder) Stats() (linesDecoded, syncFound int, signalLevel float64) {
-	return d.linesDecoded, d.syncFound, d.signalLevel
+	if d.totalPow < 1e-12 {
+		return d.linesDecoded, d.syncFound, 0
+	}
+	return d.linesDecoded, d.syncFound, d.carrierPow / d.totalPow
 }
 
 // Reset clears the decoder state and image buffer.
@@ -391,8 +456,11 @@ func (d *APTDecoder) Reset() {
 	d.linesDecoded = 0
 	d.syncFound = 0
 	d.sppCorrection = 0
-	d.signalLevel = 0
 	d.syncStreak = 0
+	d.syncMiss = 0
+	d.dcLevel = 0
+	d.carrierPow = 0
+	d.totalPow = 0
 	d.phase = 0
 	d.prevRaw = 0
 	d.prevEnv = 0
@@ -403,4 +471,6 @@ func (d *APTDecoder) Reset() {
 	d.lpEnvelope1.z2 = 0
 	d.lpEnvelope2.z1 = 0
 	d.lpEnvelope2.z2 = 0
+	d.bpCarrier.z1 = 0
+	d.bpCarrier.z2 = 0
 }

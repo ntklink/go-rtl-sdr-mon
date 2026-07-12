@@ -33,10 +33,10 @@
       </span>
     </div>
 
-    <div class="tip-bar" v-if="stats && stats.signalLevel < 0.01">
+    <div class="tip-bar" v-if="stats && stats.signalLevel < 0.02">
       {{ t('noaa.noSignal') }}
     </div>
-    <div class="tip-bar" v-else-if="stats && stats.sync === 0 && stats.signalLevel >= 0.01">
+    <div class="tip-bar" v-else-if="stats && stats.sync === 0 && stats.signalLevel >= 0.02">
       {{ t('noaa.noSync') }}
     </div>
 
@@ -72,18 +72,22 @@ const APT_LINE_WIDTH = 2080
 const satellites = ref<Satellite[]>([])
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
-// Signal level display helpers
-const signalPct = computed(() => Math.min(100, Math.max(0, (stats.value.signalLevel || 0) * 500)))
+// Signal level display helpers. signalLevel is the fraction of audio power
+// in the 2.4 kHz APT subcarrier: FM-demodulated noise stays below ~0.02,
+// a real APT signal typically reaches 0.1+.
+const SIG_NONE = 0.02
+const SIG_WEAK = 0.1
+const signalPct = computed(() => Math.min(100, Math.max(0, (stats.value.signalLevel || 0) * 300)))
 const signalClass = computed(() => {
   const s = stats.value.signalLevel || 0
-  if (s < 0.01) return 'sig-none'
-  if (s < 0.05) return 'sig-weak'
+  if (s < SIG_NONE) return 'sig-none'
+  if (s < SIG_WEAK) return 'sig-weak'
   return 'sig-good'
 })
 const signalLabel = computed(() => {
   const s = stats.value.signalLevel || 0
-  if (s < 0.01) return t('noaa.signalNone')
-  if (s < 0.05) return t('noaa.signalWeak')
+  if (s < SIG_NONE) return t('noaa.signalNone')
+  if (s < SIG_WEAK) return t('noaa.signalWeak')
   return t('noaa.signalGood')
 })
 
