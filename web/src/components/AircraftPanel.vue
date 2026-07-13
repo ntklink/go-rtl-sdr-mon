@@ -5,15 +5,15 @@
     <div class="stats-bar" v-if="stats">
       <span class="stat-item">
         <span class="stat-label">{{ t('adsb.detected') }}:</span>
-        <span class="stat-value" :class="{ zero: stats.detected === 0 }">{{ stats.detected }}</span>
+        <span class="stat-value" :class="{ zero: stats.detected === 0 }">{{ fmt(stats.detected) }}</span>
       </span>
       <span class="stat-item">
         <span class="stat-label">{{ t('adsb.valid') }}:</span>
-        <span class="stat-value" :class="{ zero: stats.valid === 0 }">{{ stats.valid }}</span>
+        <span class="stat-value" :class="{ zero: stats.valid === 0 }">{{ fmt(stats.valid) }}</span>
       </span>
       <span class="stat-item">
         <span class="stat-label">{{ t('adsb.accepted') }}:</span>
-        <span class="stat-value" :class="{ zero: stats.accepted === 0 }">{{ stats.accepted }}</span>
+        <span class="stat-value" :class="{ zero: stats.accepted === 0 }">{{ fmt(stats.accepted) }}</span>
       </span>
     </div>
     <div class="tip-bar" v-if="stats && stats.detected === 0">
@@ -92,6 +92,17 @@ const geoLoading = ref(false)
 const geoError = ref('')
 const stats = ref<{ detected: number; valid: number; accepted: number; aircraft: number } | null>(null)
 let statsTimer: ReturnType<typeof setInterval> | null = null
+
+// Compact large numbers to avoid overflow in the stats bar (e.g. 12345 -> 12.3k).
+function fmt(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) {
+    const v = n / 1000
+    return (v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, '')) + 'k'
+  }
+  const v = n / 1_000_000
+  return (v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, '')) + 'M'
+}
 
 // The displayed list depends on whether history mode is toggled on.
 const displayAircraft = computed(() => {
@@ -242,22 +253,28 @@ onUnmounted(() => {
   background: #1a1a2e;
   border-radius: 4px;
   font-size: 11px;
+  overflow: hidden;
 }
 
 .stat-item {
   display: flex;
   gap: 4px;
   align-items: center;
+  min-width: 0;
 }
 
 .stat-label {
   color: #888;
+  white-space: nowrap;
 }
 
 .stat-value {
   color: #4a4;
   font-family: 'Courier New', monospace;
   font-weight: bold;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-value.zero {
